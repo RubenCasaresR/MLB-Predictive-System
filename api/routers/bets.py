@@ -8,11 +8,13 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 import json
 import logging
+from datetime import datetime
 
 from api.models.pydantic_models import (
     EVRequest, EVResponse, BetSlipRequest, BetSlipResponse,
     PropRequest, PropResponse, SimulationRequest, SimulationResponse,
 )
+from api.models.sure_bet_models import SureBetsResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/bets", tags=["bets"])
@@ -215,6 +217,18 @@ async def get_approved_bets(
         }
         for r in rows
     ]
+
+
+# ============================================================================
+# SURE BETS (Apuestas Seguras)
+# ============================================================================
+
+@router.get("/sure-bets", response_model=SureBetsResponse)
+async def get_sure_bets():
+    from api.services.sure_bets import SureBetService
+
+    service = SureBetService()
+    return service.get_sure_bets()
 
 
 @router.get("/history")

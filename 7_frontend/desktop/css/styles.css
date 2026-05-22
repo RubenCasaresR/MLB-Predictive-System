@@ -790,6 +790,56 @@ table .text-center { text-align: center; }
   margin-bottom: 2px;
 }
 
+/* Sure Bets */
+.surebet-card { transition: all var(--transition); }
+.surebet-card:hover { box-shadow: var(--shadow-lg); }
+.surebet-header {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.safety-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 6px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.safety-score {
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.safety-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.surebet-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.surebet-reason {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+  padding: 2px 0;
+}
+.surebet-stats table {
+  font-size: 0.78rem;
+  width: auto;
+}
+.surebet-stats table td {
+  padding: 2px 0;
+  border: none;
+  white-space: nowrap;
+}
+
 /* Responsive mini */
 @media (max-width: 900px) {
   .sidebar { width: 56px; }

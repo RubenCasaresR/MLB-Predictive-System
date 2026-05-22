@@ -50,6 +50,8 @@ const api = {
 
   markAllAlertsRead() { return this.fetch('/alerts/read-all', { method: 'POST' }); },
 
+  getSureBets() { return this.fetch('/bets/sure-bets'); },
+
   getBetHistory(limit = 100) { return this.fetch(`/bets/history?limit=${limit}`); },
 
   getRiskLimits() { return this.fetch('/risk/limits'); },
