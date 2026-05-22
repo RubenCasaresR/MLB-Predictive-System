@@ -1,0 +1,103 @@
+version: "3.9"
+
+services:
+  # ==========================================================================
+  # PostgreSQL Database
+  # ==========================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: mlb-postgres
+    environment:
+      POSTGRES_DB: mlb_predictive
+      POSTGRES_USER: mlb_user
+      POSTGRES_PASSWORD: ${MLB_DB_PASSWORD:-changeme_in_prod}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlb_user -d mlb_predictive"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # FastAPI Backend
+  # ==========================================================================
+  api:
+    image: mlb-predictive-api
+    container_name: mlb-api
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://mlb_user:${MLB_DB_PASSWORD:-changeme_in_prod}@postgres:5432/mlb_predictive
+      ODDS_API_KEY: ${ODDS_API_KEY:-}
+      LOG_LEVEL: INFO
+      BANKROLL_INITIAL: ${BANKROLL_INITIAL:-10000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - api_data:/data
+    command: uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+
+  # ==========================================================================
+  # ETL Worker
+  # ==========================================================================
+  etl-worker:
+    image: mlb-predictive-etl
+    container_name: mlb-etl
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+    environment:
+      DATABASE_URL: postgresql://mlb_user:${MLB_DB_PASSWORD:-changeme_in_prod}@postgres:5432/mlb_predictive
+      ODDS_API_KEY: ${ODDS_API_KEY:-}
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - etl_data:/data
+    command: python -m etl.orchestrator --loop
+
+  # ==========================================================================
+  # Redis (Cache / Message Queue / Alert PubSub)
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: mlb-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+
+  # ==========================================================================
+  # Nginx Reverse Proxy
+  # ==========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: mlb-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - api
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+  api_data:
+  etl_data:

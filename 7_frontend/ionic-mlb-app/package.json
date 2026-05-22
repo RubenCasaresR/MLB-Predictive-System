@@ -1,0 +1,27 @@
+{
+  "name": "mlb-predictive",
+  "version": "1.0.0",
+  "description": "MLB Predictive System - Frontend",
+  "main": "index.js",
+  "scripts": {
+    "start": "ionic serve",
+    "build": "ionic build",
+    "sync": "ionic capacitor sync",
+    "android": "ionic capacitor run android",
+    "ios": "ionic capacitor run ios",
+    "test": "echo 'No tests configured'"
+  },
+  "dependencies": {
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/push-notifications": "^5.0.0",
+    "@capacitor/network": "^5.0.0",
+    "@ionic/angular": "^7.0.0",
+    "chart.js": "^4.4.0",
+    "rxjs": "^7.8.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^5.0.0",
+    "@angular/cli": "^17.0.0",
+    "typescript": "^5.0.0"
+  }
+}

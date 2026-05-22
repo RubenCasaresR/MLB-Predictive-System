@@ -1,0 +1,59 @@
+// ===========================================================================
+// MLB Predictive System - Theme Variables
+// Minimalista, elegante, clean. Zero visual noise.
+// ===========================================================================
+
+:root {
+  // === Paleta oscura profesional ===
+  --ion-color-primary:        #00d4aa;
+  --ion-color-primary-rgb:    0, 212, 170;
+  --ion-color-primary-contrast: #0a0a0f;
+  --ion-color-primary-shade:   #00b894;
+  --ion-color-primary-tint:    #33dfbe;
+
+  --ion-color-secondary:       #6c5ce7;
+  --ion-color-tertiary:        #00b4d8;
+
+  --ion-color-success:         #00e676;
+  --ion-color-warning:         #ffd54f;
+  --ion-color-danger:          #ff5252;
+  --ion-color-medium:          #2d2d3d;
+  --ion-color-light:           #1e1e2e;
+
+  // === Background ===
+  --ion-background-color:      #0a0a0f;
+  --ion-background-color-rgb:  10, 10, 15;
+  --ion-text-color:            #e0e0e0;
+  --ion-text-color-rgb:        224, 224, 224;
+
+  // === Cards ===
+  --ion-card-background:       #14141f;
+  --ion-card-border-radius:    12px;
+  --ion-card-box-shadow:       0 4px 20px rgba(0, 0, 0, 0.4);
+
+  // === Toolbar ===
+  --ion-toolbar-background:    #0d0d14;
+  --ion-toolbar-color:         #e0e0e0;
+  --ion-tab-bar-background:    #0d0d14;
+  --ion-tab-bar-color:         #555;
+  --ion-tab-bar-color-selected: #00d4aa;
+
+  // === Typography ===
+  --ion-font-family:           'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --ion-heading-font-weight:   600;
+}
+
+// === Utility classes ===
+.text-green  { color: #00d4aa; }
+.text-red    { color: #ff5252; }
+.text-yellow { color: #ffd54f; }
+.text-muted  { color: #666; }
+.text-right  { text-align: right; }
+.text-center { text-align: center; }
+.font-mono   { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+.card-flat {
+  --ion-card-background: transparent;
+  box-shadow: none;
+  border: 1px solid #2d2d3d;
+}

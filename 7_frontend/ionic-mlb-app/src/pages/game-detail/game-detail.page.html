@@ -1,0 +1,57 @@
+<!-- =========================================================================
+     Game Detail - MLB Predictive System
+     ========================================================================= -->
+
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button></ion-back-button>
+    </ion-buttons>
+    <ion-title>{{ game?.away_team }} @ {{ game?.home_team }}</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content>
+  <!-- Monte Carlo Probabilities -->
+  <ion-card *ngIf="simulation">
+    <ion-card-content>
+      <div class="prob-row">
+        <div class="team-prob">
+          <span class="team-name">{{ simulation.away_team }}</span>
+          <span class="prob-value font-mono">{{ simulation.away_win_prob | percent:'1.1-1' }}</span>
+        </div>
+        <div class="vs">VS</div>
+        <div class="team-prob home">
+          <span class="team-name">{{ simulation.home_team }}</span>
+          <span class="prob-value font-mono">{{ simulation.home_win_prob | percent:'1.1-1' }}</span>
+        </div>
+      </div>
+
+      <div class="expected-runs">
+        <span>Carreras esperadas: {{ simulation.away_team }} {{ simulation.mean_away_runs | number:'1.1-1' }}
+          - {{ simulation.home_team }} {{ simulation.mean_home_runs | number:'1.1-1' }}</span>
+        <span class="text-muted">({{ simulation.n_iterations }} iteraciones)</span>
+      </div>
+    </ion-card-content>
+  </ion-card>
+
+  <!-- EV+ Bets for this game -->
+  <ion-card *ngFor="let bet of gameBets" class="ev-card">
+    <ion-card-content>
+      <div class="ev-header">
+        <span>{{ bet.team }}</span>
+        <span class="odds font-mono">{{ bet.odds > 0 ? '+' : '' }}{{ bet.odds }}</span>
+      </div>
+      <div class="ev-details">
+        <div class="ev-metric">
+          <span class="label">Edge</span>
+          <span class="value text-green font-mono">{{ bet.edge | percent }}</span>
+        </div>
+        <div class="ev-metric">
+          <span class="label">Stake</span>
+          <span class="value font-mono">${{ bet.recommended_stake }}</span>
+        </div>
+      </div>
+    </ion-card-content>
+  </ion-card>
+</ion-content>

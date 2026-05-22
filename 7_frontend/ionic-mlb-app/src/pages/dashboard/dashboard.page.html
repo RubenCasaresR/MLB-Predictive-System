@@ -1,0 +1,137 @@
+<!-- =========================================================================
+     Dashboard Principal - MLB Predictive System
+     Minimalista. Datos procesables. Zero ruido.
+     ========================================================================= -->
+
+<ion-header>
+  <ion-toolbar>
+    <ion-title>
+      <span class="text-green">MLB</span> Predictive
+    </ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="refresh()">
+        <ion-icon name="refresh-outline"></ion-icon>
+      </ion-button>
+      <ion-button (click)="openAlerts()" class="alert-bell">
+        <ion-icon name="notifications-outline"></ion-icon>
+        <ion-badge color="danger" *ngIf="unreadCount > 0">{{ unreadCount }}</ion-badge>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content>
+  <!-- Bankroll Summary -->
+  <ion-card class="bankroll-card">
+    <ion-card-content>
+      <div class="bankroll-row">
+        <span class="label">Bankroll</span>
+        <span class="value font-mono">${{ bankroll.current | number:'1.2-2' }}</span>
+      </div>
+      <div class="bankroll-details">
+        <div class="detail">
+          <span class="label">ROI</span>
+          <span class="value" [class.text-green]="bankroll.roi_pct >= 0"
+                             [class.text-red]="bankroll.roi_pct < 0">
+            {{ bankroll.roi_pct }}%
+          </span>
+        </div>
+        <div class="detail">
+          <span class="label">Drawdown</span>
+          <span class="value text-yellow">{{ bankroll.drawdown_pct }}%</span>
+        </div>
+        <div class="detail">
+          <span class="label">Bets</span>
+          <span class="value">{{ bankroll.bet_count }}</span>
+        </div>
+      </div>
+    </ion-card-content>
+  </ion-card>
+
+  <!-- Today's Games -->
+  <div class="section-header">
+    <span>Juegos del Día</span>
+    <span class="text-muted">{{ games.length }} juegos</span>
+  </div>
+
+  <ion-card *ngFor="let game of games" class="game-card" [routerLink]="['/game', game.game_id]">
+    <ion-card-content>
+      <div class="game-header">
+        <span class="time">{{ game.start_time_et | date:'HH:mm' }}</span>
+        <span class="status" [class.live]="game.status === 'IN_PROGRESS'">{{ game.status }}</span>
+      </div>
+      <div class="game-matchup">
+        <div class="team">
+          <span class="team-name">{{ game.away_team }}</span>
+          <span *ngIf="game.away_pitcher" class="pitcher text-muted">{{ game.away_pitcher }}</span>
+        </div>
+        <div class="score" *ngIf="game.home_score !== null">
+          {{ game.away_score }} - {{ game.home_score }}
+        </div>
+        <div class="team home">
+          <span class="team-name">{{ game.home_team }}</span>
+          <span *ngIf="game.home_pitcher" class="pitcher text-muted">{{ game.home_pitcher }}</span>
+        </div>
+      </div>
+      <div class="game-odds">
+        <span class="odds" *ngIf="game.home_moneyline">
+          {{ game.home_team }} {{ game.home_moneyline > 0 ? '+' : '' }}{{ game.home_moneyline }}
+        </span>
+        <span class="total" *ngIf="game.total">O/U {{ game.total }}</span>
+        <span class="odds" *ngIf="game.away_moneyline">
+          {{ game.away_team }} {{ game.away_moneyline > 0 ? '+' : '' }}{{ game.away_moneyline }}
+        </span>
+      </div>
+      <div class="game-signals" *ngIf="game.sharp_money_flag || game.rlm_flag">
+        <ion-badge color="warning" *ngIf="game.rlm_flag">RLM</ion-badge>
+        <ion-badge color="tertiary" *ngIf="game.sharp_money_flag">Sharp</ion-badge>
+      </div>
+    </ion-card-content>
+  </ion-card>
+
+  <!-- EV+ Bets -->
+  <div class="section-header">
+    <span>Apuestas EV+</span>
+    <span class="text-green" *ngIf="evBets.length > 0">{{ evBets.length }} oportunidades</span>
+  </div>
+
+  <ion-card *ngFor="let bet of evBets" class="ev-card">
+    <ion-card-content>
+      <div class="ev-header">
+        <span class="team">{{ bet.team }}</span>
+        <span class="odds font-mono">{{ bet.odds > 0 ? '+' : '' }}{{ bet.odds }}</span>
+      </div>
+      <div class="ev-details">
+        <div class="ev-metric">
+          <span class="label">Edge</span>
+          <span class="value text-green font-mono">{{ bet.edge | percent:'1.2-2' }}</span>
+        </div>
+        <div class="ev-metric">
+          <span class="label">Kelly</span>
+          <span class="value font-mono">{{ bet.kelly_fraction | percent:'1.2-2' }}</span>
+        </div>
+        <div class="ev-metric">
+          <span class="label">Stake</span>
+          <span class="value font-mono">${{ bet.recommended_stake | number:'1.2-2' }}</span>
+        </div>
+        <div class="ev-metric">
+          <span class="label">Confianza</span>
+          <span class="value" [class.text-green]="bet.confidence >= 0.7"
+                             [class.text-yellow]="bet.confidence < 0.7">
+            {{ bet.confidence | percent }}
+          </span>
+        </div>
+      </div>
+      <div class="ev-footer">
+        <span class="text-muted">{{ bet.sportsbook }} • {{ bet.market_type }}</span>
+        <span class="text-muted">{{ bet.game_id }}</span>
+      </div>
+    </ion-card-content>
+  </ion-card>
+
+  <ion-card *ngIf="evBets.length === 0" class="card-flat">
+    <ion-card-content class="text-center text-muted">
+      No hay oportunidades EV+ en este momento
+    </ion-card-content>
+  </ion-card>
+</ion-content>

@@ -1,0 +1,19 @@
+{
+  "intercept": 0.0,
+  "coefficients": {
+    "velo_centered": 0.0,
+    "whiff_rate": 0.0,
+    "spin_centered": 0.0
+  },
+  "metrics": {
+    "r_squared": NaN,
+    "mse": 1.0,
+    "mae": 1.0,
+    "train_samples": 3,
+    "test_samples": 1
+  },
+  "trained_at": "2026-05-21T10:20:10.559978",
+  "seasons": [
+    2024
+  ]
+}

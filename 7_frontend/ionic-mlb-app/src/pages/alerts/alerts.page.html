@@ -1,0 +1,44 @@
+<!-- =========================================================================
+     Alertas - MLB Predictive System
+     ========================================================================= -->
+
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button></ion-back-button>
+    </ion-buttons>
+    <ion-title>Alertas</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="markAllRead()">
+        <ion-icon name="checkmark-done-outline"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content>
+  <ion-card *ngFor="let alert of alerts" class="alert-card"
+            [class.unread]="!alert.is_read">
+    <ion-card-content>
+      <div class="alert-header">
+        <ion-badge [color]="getSignalColor(alert.signal_type)">
+          {{ alert.signal_type }}
+        </ion-badge>
+        <span class="time text-muted">{{ alert.created_at | date:'HH:mm:ss' }}</span>
+      </div>
+      <p class="alert-message">{{ alert.message }}</p>
+      <div class="alert-details">
+        <span class="text-muted">{{ alert.game_id }}</span>
+        <span class="confidence" *ngIf="alert.confidence">
+          Confianza: {{ alert.confidence | percent }}
+        </span>
+      </div>
+    </ion-card-content>
+  </ion-card>
+
+  <ion-card *ngIf="alerts.length === 0" class="card-flat">
+    <ion-card-content class="text-center text-muted">
+      No hay alertas recientes
+    </ion-card-content>
+  </ion-card>
+</ion-content>
