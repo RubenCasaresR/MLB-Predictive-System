@@ -41,16 +41,16 @@ class FeaturePipeline:
                     g.game_id,
                     g.game_date,
                     ROUND(CAST(AVG(CASE
-                        WHEN ab.events IN ('walk','hit_by_pitch') THEN 0.70
-                        WHEN ab.events = 'single' THEN 0.90
-                        WHEN ab.events = 'double' THEN 1.25
-                        WHEN ab.events = 'triple' THEN 1.60
-                        WHEN ab.events = 'home_run' THEN 2.00
+                        WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 0.70
+                        WHEN ab.events = 'Single' THEN 0.90
+                        WHEN ab.events = 'Double' THEN 1.25
+                        WHEN ab.events = 'Triple' THEN 1.60
+                        WHEN ab.events = 'Home Run' THEN 2.00
                         ELSE 0 END) AS NUMERIC), 4) AS woba,
                     ROUND(COALESCE(
-                        (13.0 * SUM(CASE WHEN ab.events = 'home_run' THEN 1 ELSE 0 END)
-                         + 3.0 * SUM(CASE WHEN ab.events IN ('walk','hit_by_pitch') THEN 1 ELSE 0 END)
-                         - 2.0 * SUM(CASE WHEN ab.events = 'strikeout' THEN 1 ELSE 0 END))
+                        (13.0 * SUM(CASE WHEN ab.events = 'Home Run' THEN 1 ELSE 0 END)
+                         + 3.0 * SUM(CASE WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 1 ELSE 0 END)
+                         - 2.0 * SUM(CASE WHEN ab.events IN ('Strikeout','Strikeout Double Play') THEN 1 ELSE 0 END))
                         / NULLIF(SUM(CASE WHEN ab.events IS NOT NULL THEN 1 ELSE 0 END), 0) * 9.0 + 3.10, 4.20
                     ), 4) AS fip,
                     ROUND(CAST(AVG(p.release_speed) AS NUMERIC), 2) AS avg_velo,
@@ -87,18 +87,18 @@ class FeaturePipeline:
                     g.game_id,
                     g.game_date,
                     ROUND(CAST(AVG(CASE
-                        WHEN ab.events IN ('walk','hit_by_pitch') THEN 0.70
-                        WHEN ab.events = 'single' THEN 0.90
-                        WHEN ab.events = 'double' THEN 1.25
-                        WHEN ab.events = 'triple' THEN 1.60
-                        WHEN ab.events = 'home_run' THEN 2.00
+                        WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 0.70
+                        WHEN ab.events = 'Single' THEN 0.90
+                        WHEN ab.events = 'Double' THEN 1.25
+                        WHEN ab.events = 'Triple' THEN 1.60
+                        WHEN ab.events = 'Home Run' THEN 2.00
                         ELSE 0 END) AS NUMERIC), 4) AS woba,
-                    ROUND(CAST(SUM(CASE WHEN ab.events = 'strikeout' THEN 1 ELSE 0 END) AS NUMERIC)
+                    ROUND(CAST(SUM(CASE WHEN ab.events IN ('Strikeout','Strikeout Double Play') THEN 1 ELSE 0 END) AS NUMERIC)
                         / NULLIF(CAST(COUNT(*) AS NUMERIC), 0) * 100, 1) AS k_pct,
-                    ROUND(CAST(SUM(CASE WHEN ab.events IN ('walk','hit_by_pitch') THEN 1 ELSE 0 END) AS NUMERIC)
+                    ROUND(CAST(SUM(CASE WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 1 ELSE 0 END) AS NUMERIC)
                         / NULLIF(CAST(COUNT(*) AS NUMERIC), 0) * 100, 1) AS bb_pct,
                     ROUND(COALESCE(
-                        CAST(SUM(CASE WHEN ab.events = 'home_run' THEN 1 ELSE 0 END) AS NUMERIC)
+                        CAST(SUM(CASE WHEN ab.events = 'Home Run' THEN 1 ELSE 0 END) AS NUMERIC)
                         / NULLIF(SUM(CASE WHEN ab.events IS NOT NULL THEN 1 ELSE 0 END), 0) * 9.0, 0
                     ), 2) AS hr_per_9,
                     ROUND(COALESCE(
@@ -136,11 +136,11 @@ class FeaturePipeline:
                 FROM (
                     SELECT g.home_team_id AS team_id, g.game_id, g.game_date,
                            CASE
-                               WHEN ab.events IN ('walk','hit_by_pitch') THEN 0.70
-                               WHEN ab.events = 'single' THEN 0.90
-                               WHEN ab.events = 'double' THEN 1.25
-                               WHEN ab.events = 'triple' THEN 1.60
-                               WHEN ab.events = 'home_run' THEN 2.00
+                               WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 0.70
+                               WHEN ab.events = 'Single' THEN 0.90
+                               WHEN ab.events = 'Double' THEN 1.25
+                               WHEN ab.events = 'Triple' THEN 1.60
+                               WHEN ab.events = 'Home Run' THEN 2.00
                                ELSE 0 END AS woba
                     FROM games g
                     JOIN at_bats ab ON ab.game_id = g.game_id
@@ -149,11 +149,11 @@ class FeaturePipeline:
                     UNION ALL
                     SELECT g.away_team_id, g.game_id, g.game_date,
                            CASE
-                               WHEN ab.events IN ('walk','hit_by_pitch') THEN 0.70
-                               WHEN ab.events = 'single' THEN 0.90
-                               WHEN ab.events = 'double' THEN 1.25
-                               WHEN ab.events = 'triple' THEN 1.60
-                               WHEN ab.events = 'home_run' THEN 2.00
+                               WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 0.70
+                               WHEN ab.events = 'Single' THEN 0.90
+                               WHEN ab.events = 'Double' THEN 1.25
+                               WHEN ab.events = 'Triple' THEN 1.60
+                               WHEN ab.events = 'Home Run' THEN 2.00
                                ELSE 0 END
                     FROM games g
                     JOIN at_bats ab ON ab.game_id = g.game_id
@@ -267,11 +267,11 @@ class FeaturePipeline:
                     FROM (
                         SELECT ab.pitcher_id, g.game_id,
                                 ROUND(CAST(AVG(CASE
-                                    WHEN ab.events IN ('walk','hit_by_pitch') THEN 0.70
-                                    WHEN ab.events = 'single' THEN 0.90
-                                    WHEN ab.events = 'double' THEN 1.25
-                                    WHEN ab.events = 'triple' THEN 1.60
-                                    WHEN ab.events = 'home_run' THEN 2.00
+                        WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 0.70
+                                    WHEN ab.events = 'Single' THEN 0.90
+                                    WHEN ab.events = 'Double' THEN 1.25
+                                    WHEN ab.events = 'Triple' THEN 1.60
+                                    WHEN ab.events = 'Home Run' THEN 2.00
                                     ELSE 0 END) AS NUMERIC), 4) AS woba
                         FROM games g
                         JOIN at_bats ab ON ab.game_id = g.game_id

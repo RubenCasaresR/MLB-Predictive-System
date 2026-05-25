@@ -297,6 +297,8 @@ class MonteCarloMLBSimulator:
             while True:
                 if state.half == "top":
                     state.reset_half()
+                    if state.inning > self.MAX_INNINGS:
+                        extra_innings[it] = True
                     while state.outs < self.OUTS_PER_HALF:
                         batter_idx = away_idx % 9
                         bp = self._get_inning_probs(
@@ -330,11 +332,6 @@ class MonteCarloMLBSimulator:
                         break
                     state.half = "top"
                     state.inning += 1
-
-                if (state.inning > self.MAX_INNINGS
-                    and state.half == "top"
-                    and state.outs == 0):
-                    extra_innings[it] = True
 
             home_runs[it] = state.home_score
             away_runs[it] = state.away_score

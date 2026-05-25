@@ -54,7 +54,7 @@ class PoissonGLMTrainer:
             p.whiff,
             g.season,
             g.game_date,
-            CASE WHEN ab.events = 'strikeout' THEN 1 ELSE 0 END AS is_k
+            CASE WHEN ab.events IN ('Strikeout','Strikeout Double Play') THEN 1 ELSE 0 END AS is_k
         FROM pitches p
         JOIN at_bats ab ON ab.ab_id = p.ab_id
         JOIN games g ON g.game_id = ab.game_id

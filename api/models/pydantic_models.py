@@ -196,3 +196,149 @@ class ExposureResponse(BaseModel):
     current_bankroll: float
     stake: float
     stake_pct: float
+
+
+# ============================================================================
+# ANÁLISIS DIARIO
+# ============================================================================
+
+class PitchingAnalysis(BaseModel):
+    pitcher_name: str = ""
+    throws: str = ""
+    fip_30d: Optional[float] = None
+    k_per_9_30d: Optional[float] = None
+    bb_per_9_30d: Optional[float] = None
+    hr_per_9_30d: Optional[float] = None
+    avg_velo_30d: Optional[float] = None
+    whiff_pct_30d: Optional[float] = None
+    fatigue_score: Optional[float] = None
+    platoon_advantage: bool = False
+    summary: str = ""
+
+
+class OffensiveAnalysis(BaseModel):
+    woba_30d: Optional[float] = None
+    woba_vs_hand: Optional[float] = None
+    barrel_pct_30d: Optional[float] = None
+    hard_hit_pct_30d: Optional[float] = None
+    k_pct_30d: Optional[float] = None
+    bb_pct_30d: Optional[float] = None
+    run_diff_30d: Optional[float] = None
+    record_last_10: str = ""
+    summary: str = ""
+
+
+class BullpenAnalysis(BaseModel):
+    bullpen_era_30d: Optional[float] = None
+    bullpen_fip_30d: Optional[float] = None
+    summary: str = ""
+
+
+class WeatherImpact(BaseModel):
+    temperature: Optional[float] = None
+    wind_speed: Optional[float] = None
+    wind_direction: str = ""
+    precipitation_pct: Optional[float] = None
+    condition: str = ""
+    wind_effect: str = ""
+    temp_effect: str = ""
+    summary: str = ""
+
+
+class ParkFactor(BaseModel):
+    hr_factor: float = 1.0
+    woba_factor: float = 1.0
+    k_factor: float = 1.0
+    stadium_name: str = ""
+    summary: str = ""
+
+
+class FatigueAnalysis(BaseModel):
+    rest_days: int = 0
+    travel_miles: int = 0
+    tz_crossings: int = 0
+    day_game_after_night: bool = False
+    summary: str = ""
+
+
+class MarketSignals(BaseModel):
+    sharp_money_flag: bool = False
+    rlm_flag: bool = False
+    home_moneyline: Optional[int] = None
+    away_moneyline: Optional[int] = None
+    total_line: Optional[float] = None
+    summary: str = ""
+
+
+class PropAnalysisItem(BaseModel):
+    player_name: str = ""
+    prop_type: str = ""
+    line_value: float = 0
+    predicted_mean: float = 0
+    prob_over: float = 0
+    prob_under: float = 0
+    ev_over: float = 0
+    ev_under: float = 0
+    recommendation: str = ""
+    edge_pct: float = 0
+    kelly_fraction: float = 0
+
+
+class RecommendedBet(BaseModel):
+    team: str = ""
+    opponent: str = ""
+    market_type: str = ""
+    odds: int = 0
+    edge_pct: float = 0
+    confidence: str = ""
+    kelly_fraction: float = 0
+    recommended_stake: float = 0
+    reasoning: List[str] = []
+
+
+class GameAnalysis(BaseModel):
+    game_id: str
+    game_date: str
+    start_time: str = ""
+    status: str = ""
+    home_team_id: str
+    away_team_id: str
+    home_team_name: str = ""
+    away_team_name: str = ""
+
+    home_win_prob: float = 0
+    away_win_prob: float = 0
+    favorite_id: str = ""
+    favorite_name: str = ""
+    underdog_id: str = ""
+    underdog_name: str = ""
+    win_prob_gap: float = 0
+
+    mean_home_runs: float = 0
+    mean_away_runs: float = 0
+    predicted_total: float = 0
+
+    pitching_home: PitchingAnalysis = PitchingAnalysis()
+    pitching_away: PitchingAnalysis = PitchingAnalysis()
+    offensive_home: OffensiveAnalysis = OffensiveAnalysis()
+    offensive_away: OffensiveAnalysis = OffensiveAnalysis()
+    bullpen_home: BullpenAnalysis = BullpenAnalysis()
+    bullpen_away: BullpenAnalysis = BullpenAnalysis()
+    weather: WeatherImpact = WeatherImpact()
+    park_factors: ParkFactor = ParkFactor()
+    fatigue_home: FatigueAnalysis = FatigueAnalysis()
+    fatigue_away: FatigueAnalysis = FatigueAnalysis()
+    market_signals: MarketSignals = MarketSignals()
+
+    recommended_bet: Optional[RecommendedBet] = None
+    props: List[PropAnalysisItem] = []
+
+    analysis_narrative: str = ""
+    key_factors: List[str] = []
+
+
+class DailyAnalysisResponse(BaseModel):
+    game_date: str
+    generated_at: datetime
+    total_games: int = 0
+    games: List[GameAnalysis] = []

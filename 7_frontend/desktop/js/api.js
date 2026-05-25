@@ -62,6 +62,11 @@ const api = {
 
   getPlayerStats(playerId) { return this.fetch(`/stats/players/${playerId}`); },
 
+  getDailyAnalysis(date) {
+    const q = date ? `?date=${date}` : '';
+    return this.fetch(`/analysis/daily${q}`);
+  },
+
   getSharpMoneySignals(gameId) {
     const q = gameId ? `?game_id=${gameId}` : '';
     return this.fetch(`/stats/market/sharp-money${q}`);

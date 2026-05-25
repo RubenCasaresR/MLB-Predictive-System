@@ -21,6 +21,7 @@ SAMPLE_PLAY = {
         "inning": 1,
         "halfInning": "top",
         "outs": 0,
+        "atBatIndex": 1,
     },
     "matchup": {
         "batter": {"id": 101, "fullName": "Test Batter"},
@@ -60,7 +61,7 @@ def ingestor():
 
 class TestParseAtBat:
     def test_parse_single(self, ingestor):
-        ab = ingestor._parse_at_bat(SAMPLE_PLAY, "2026-05-20-NYY-BOS")
+        ab = ingestor._parse_at_bat(SAMPLE_PLAY, "2026-05-20-NYY-BOS", 1)
         assert ab is not None
         assert ab["ab_id"] == 1
         assert ab["game_id"] == "2026-05-20-NYY-BOS"
@@ -79,19 +80,19 @@ class TestParseAtBat:
     def test_parse_home_run(self, ingestor):
         play = SAMPLE_PLAY.copy()
         play["result"] = {**play["result"], "event": "home_run"}
-        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS")
+        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS", 1)
         assert ab["events"] == "home_run"
 
     def test_parse_strikeout(self, ingestor):
         play = SAMPLE_PLAY.copy()
         play["result"] = {**play["result"], "event": "strikeout"}
-        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS")
+        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS", 1)
         assert ab["events"] == "strikeout"
 
     def test_parse_walk(self, ingestor):
         play = SAMPLE_PLAY.copy()
         play["result"] = {**play["result"], "event": "walk"}
-        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS")
+        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS", 1)
         assert ab["events"] == "walk"
 
     def test_parse_with_launch_data(self, ingestor):
@@ -99,14 +100,14 @@ class TestParseAtBat:
         play["result"]["launchSpeed"] = 105.2
         play["result"]["launchAngle"] = 22.5
         play["result"]["estimatedWobaUsingSpeedAngle"] = 0.890
-        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS")
+        ab = ingestor._parse_at_bat(play, "2026-05-20-NYY-BOS", 1)
         assert ab["launch_speed"] == 105.2
         assert ab["launch_angle"] == 22.5
         assert ab["estimated_woba_using_speedangle"] == 0.890
 
     def test_parse_missing_fields_returns_none(self, ingestor):
         with pytest.raises(Exception, match=None):
-            result = ingestor._parse_at_bat({}, "game-id")
+            result = ingestor._parse_at_bat({}, "game-id", 0)
             # may or may not return None depending on implementation
             assert result is None
 
@@ -198,10 +199,19 @@ class TestLoadToDatabase:
         ingestor.engine = engine
         with engine.begin() as conn:
             conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS players (
+                    player_id INTEGER PRIMARY KEY,
+                    full_name TEXT
+                )
+            """))
+            conn.execute(text("""
+                INSERT INTO players (player_id, full_name) VALUES (201, 'Test Pitcher')
+            """))
+            conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS at_bats (
                     ab_id INTEGER PRIMARY KEY,
                     game_id TEXT,
-                    pitcher_id INTEGER,
+                    pitcher_id INTEGER REFERENCES players(player_id),
                     events TEXT
                 )
             """))
@@ -255,8 +265,8 @@ class TestFetchDailyGames:
                 "games": [{
                     "gamePk": 123456,
                     "teams": {
-                        "home": {"team": {"abbreviation": "BOS"}, "probablePitcher": {"id": 601}},
-                        "away": {"team": {"abbreviation": "NYY"}},
+                        "home": {"team": {"abbreviation": "BOS", "id": 99901, "name": "Boston Red Sox"}, "probablePitcher": {"id": 601}},
+                        "away": {"team": {"abbreviation": "NYY", "id": 99902, "name": "New York Yankees"}},
                     },
                     "status": {"detailedState": "SCHEDULED"},
                     "venue": {"id": 3},
@@ -277,7 +287,7 @@ class TestFetchDailyGames:
         df = ingestor.fetch_daily_games(date(2026, 5, 20))
         assert len(df) == 1
         row = df.iloc[0]
-        assert row["game_id"] == 123456
+        assert row["game_id"] == "NYYBOS260520"
         assert row["home_team_id"] == "BOS"
         assert row["away_team_id"] == "NYY"
         assert row["status"] == "SCHEDULED"

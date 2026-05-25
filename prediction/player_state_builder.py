@@ -45,17 +45,19 @@ def _fetch_pitcher_state(engine, pitcher_id: int, target_date: date) -> PitcherS
     if row:
         k_pct, bb_pct, hr_per_9, whiff_pct, velo, spin, days_rested, pitches_l7, throws, name = row
         name = name or f"Pitcher_{pitcher_id}"
-        k_rate = (k_pct or _LEAGUE_AVG_K_RATE * 100) / 100.0
-        bb_rate = (bb_pct or _LEAGUE_AVG_BB_RATE * 100) / 100.0
-        hr_rate = hr_per_9 if hr_per_9 is not None else _LEAGUE_AVG_HR_RATE
-        whiff = (whiff_pct or _LEAGUE_AVG_WHIFF_PCT * 100) / 100.0
-        avg_velo = velo or _LEAGUE_AVG_VELO
-        avg_spin = spin or _LEAGUE_AVG_SPIN
+        k_rate = (float(k_pct) if k_pct is not None else _LEAGUE_AVG_K_RATE * 100) / 100.0
+        bb_rate = (float(bb_pct) if bb_pct is not None else _LEAGUE_AVG_BB_RATE * 100) / 100.0
+        hr_rate = float(hr_per_9) if hr_per_9 is not None else _LEAGUE_AVG_HR_RATE
+        whiff = (float(whiff_pct) if whiff_pct is not None else _LEAGUE_AVG_WHIFF_PCT * 100) / 100.0
+        avg_velo = float(velo) if velo is not None else _LEAGUE_AVG_VELO
+        avg_spin = float(spin) if spin is not None else _LEAGUE_AVG_SPIN
+        rest = int(days_rested) if days_rested is not None else 0
+        p7 = int(pitches_l7) if pitches_l7 is not None else 0
         fatigue = 1.0
-        if days_rested and days_rested < 4:
-            fatigue -= (4 - days_rested) * 0.05
-        if pitches_l7 and pitches_l7 > 100:
-            fatigue -= (pitches_l7 - 100) * 0.001
+        if rest < 4:
+            fatigue -= (4 - rest) * 0.05
+        if p7 > 100:
+            fatigue -= (p7 - 100) * 0.001
         fatigue = max(0.75, min(1.0, fatigue))
     else:
         name = f"Pitcher_{pitcher_id}"
@@ -113,13 +115,13 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> List[BatterSt
         gb_pct, fb_pct, bats, name,
     ) in rows:
         name = name or f"Player_{pid}"
-        k_rate = (k_pct or _LEAGUE_AVG_K_RATE * 100) / 100.0
-        bb_rate = (bb_pct or _LEAGUE_AVG_BB_RATE * 100) / 100.0
-        hr_rate = hr_per_9 if hr_per_9 is not None else _LEAGUE_AVG_HR_RATE
-        gb_rate = (gb_pct or _LEAGUE_AVG_GB_RATE * 100) / 100.0
-        fb_rate = (fb_pct or _LEAGUE_AVG_FB_RATE * 100) / 100.0
+        k_rate = (float(k_pct) if k_pct is not None else _LEAGUE_AVG_K_RATE * 100) / 100.0
+        bb_rate = (float(bb_pct) if bb_pct is not None else _LEAGUE_AVG_BB_RATE * 100) / 100.0
+        hr_rate = float(hr_per_9) if hr_per_9 is not None else _LEAGUE_AVG_HR_RATE
+        gb_rate = (float(gb_pct) if gb_pct is not None else _LEAGUE_AVG_GB_RATE * 100) / 100.0
+        fb_rate = (float(fb_pct) if fb_pct is not None else _LEAGUE_AVG_FB_RATE * 100) / 100.0
 
-        woba_vs = woba_30d if woba_30d is not None else _LEAGUE_AVG_WOBA
+        woba_vs = float(woba_30d) if woba_30d is not None else _LEAGUE_AVG_WOBA
         lineups.append(BatterState(
             player_id=pid,
             name=name,

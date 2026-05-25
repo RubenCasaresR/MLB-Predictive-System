@@ -2,6 +2,7 @@ const App = {
   currentPage: '',
   pageTitleMap: {
     dashboard: 'Dashboard',
+    'daily-analysis': '📊 Análisis Diario',
     surebets: '🛡️ Apuestas Seguras',
     bets: 'Apuestas EV+',
     games: 'Juegos del Día',
@@ -51,6 +52,7 @@ const App = {
     try {
       switch (page) {
         case 'dashboard': await DashboardPage.load(container); break;
+        case 'daily-analysis': await DailyAnalysisPage.load(container); break;
         case 'surebets': await SureBetsPage.load(container); break;
         case 'bets': await BetsPage.load(container); break;
         case 'games': await GamesPage.load(container); break;

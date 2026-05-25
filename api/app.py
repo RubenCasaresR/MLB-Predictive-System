@@ -19,7 +19,7 @@ from slowapi.errors import RateLimitExceeded
 import logging
 import logging.config
 
-from api.routers import bets, alerts, stats, risk
+from api.routers import bets, alerts, stats, risk, analysis
 from api.database import get_engine
 import requests as http_requests
 
@@ -80,6 +80,7 @@ app.include_router(bets.router)
 app.include_router(alerts.router)
 app.include_router(stats.router)
 app.include_router(risk.router)
+app.include_router(analysis.router)
 
 # Frontend estático (desktop)
 import pathlib

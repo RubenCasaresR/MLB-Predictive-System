@@ -115,6 +115,7 @@ class StatcastIngestor:
                 gid = f"{away_abbr}{home_abbr}{game_date.strftime('%y%m%d')}"
                 games.append({
                     "game_id": gid,
+                    "mlb_game_pk": game.get("gamePk"),
                     "game_date": game_date.isoformat(),
                     "home_team_id": home_abbr,
                     "away_team_id": away_abbr,
@@ -130,10 +131,9 @@ class StatcastIngestor:
     @with_retry(max_retries=3, base_delay=2.0)
     def fetch_game_playbyplay(self, game_pk: int) -> Dict:
         url = f"{self.base_url_v11}/game/{game_pk}/feed/live"
-        params = {"fields": "liveData,plays,allPlays,result,about,matchup,playEvents,count,details,pitchData,breaks,coordinates,hitData"}
 
         logger.info(f"Fetching play-by-play for game {game_pk}")
-        resp = requests.get(url, params=params, timeout=60)
+        resp = requests.get(url, timeout=60)
         resp.raise_for_status()
         data = resp.json()
         return data.get("liveData", {}).get("plays", {})
@@ -149,7 +149,13 @@ class StatcastIngestor:
             home_after = result.get("homeScore", prev_home_score)
             away_after = result.get("awayScore", prev_away_score)
 
-            ab = self._parse_at_bat(play, game_id, prev_home_score, prev_away_score)
+            at_bat_index = play.get("atBatIndex")
+            if at_bat_index is None:
+                prev_home_score = home_after
+                prev_away_score = away_after
+                continue
+
+            ab = self._parse_at_bat(play, game_id, at_bat_index, prev_home_score, prev_away_score)
             if ab is None:
                 prev_home_score = home_after
                 prev_away_score = away_after
@@ -161,27 +167,28 @@ class StatcastIngestor:
 
             for pitch_data in play.get("playEvents", []):
                 if pitch_data.get("isPitch"):
-                    pitch = self._parse_pitch(pitch_data, ab["ab_id"])
+                    pitch = self._parse_pitch(pitch_data, ab["ab_id"], game_id)
                     if pitch:
                         pitches.append(pitch)
 
         return {"at_bats": at_bats, "pitches": pitches}
 
-    def _parse_at_bat(self, play: Dict, game_id: str,
+    def _parse_at_bat(self, play: Dict, game_id: str, at_bat_index: int,
                       prev_home_score: int = 0, prev_away_score: int = 0) -> Optional[Dict]:
         try:
             result = play.get("result", {})
             matchup = play.get("matchup", {})
             about = play.get("about", {})
 
+            count = play.get("count", {})
             return {
-                "ab_id": play.get("atBatIndex") or play.get("playId"),
+                "ab_id": at_bat_index,
                 "game_id": game_id,
                 "inning": about.get("inning"),
                 "half_inning": "T" if about.get("halfInning") == "top" else "B",
                 "batter_id": matchup.get("batter", {}).get("id"),
                 "pitcher_id": matchup.get("pitcher", {}).get("id"),
-                "outs_before": about.get("outs"),
+                "outs_before": count.get("outs", about.get("outs")),
                 "home_score_before": prev_home_score,
                 "away_score_before": prev_away_score,
                 "bases_code": self._get_bases_code(result.get("beforePitch", {})),
@@ -198,10 +205,11 @@ class StatcastIngestor:
             logger.warning(f"Error parsing at_bat: {e}")
             return None
 
-    def _parse_pitch(self, pitch: Dict, ab_id: int) -> Optional[Dict]:
+    def _parse_pitch(self, pitch: Dict, ab_id: int, game_id: str) -> Optional[Dict]:
         try:
             return {
                 "ab_id": ab_id,
+                "game_id": game_id,
                 "pitch_number": pitch.get("pitchNumber"),
                 "pitch_type": pitch.get("details", {}).get("type", {}).get("code"),
                 "pitch_name": pitch.get("details", {}).get("type", {}).get("description"),
@@ -230,6 +238,46 @@ class StatcastIngestor:
             bases.append("1" if before_pitch.get(f"{base}Base") else "0")
         return "".join(bases)
 
+    def _ensure_players(self, player_ids: set):
+        if not player_ids:
+            return
+        ids_list = list(player_ids)
+        placeholders = ",".join(f":id_{i}" for i in range(len(ids_list)))
+        params = {f"id_{i}": pid for i, pid in enumerate(ids_list)}
+        with self.engine.connect() as conn:
+            existing = {r[0] for r in conn.execute(
+                text(f"SELECT player_id FROM players WHERE player_id IN ({placeholders})"),
+                params,
+            ).fetchall()}
+        missing = player_ids - set(existing)
+        if not missing:
+            return
+        for pid in sorted(missing):
+            try:
+                url = f"{self.base_url}/people/{pid}"
+                resp = requests.get(url, timeout=15)
+                resp.raise_for_status()
+                people = resp.json().get("people", [])
+                if not people:
+                    continue
+                p = people[0]
+                pos = (p.get("primaryPosition") or {}).get("abbreviation")
+                with self.engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO players (player_id, full_name, primary_position, bats, throws, status)
+                        VALUES (:pid, :name, :pos, :bats, :throws, :status)
+                        ON CONFLICT (player_id) DO NOTHING
+                    """), {
+                        "pid": pid,
+                        "name": p.get("fullName", f"Player {pid}"),
+                        "pos": pos,
+                        "bats": (p.get("batSide") or {}).get("code"),
+                        "throws": (p.get("pitchHand") or {}).get("code"),
+                        "status": (p.get("status") or {}).get("code"),
+                    })
+            except Exception as e:
+                logger.warning(f"Could not fetch player {pid}: {e}")
+
     def load_to_database(self, game_data: Dict, game_id: str):
         at_bats_df = pd.DataFrame(game_data["at_bats"])
         pitches_df = pd.DataFrame(game_data["pitches"])
@@ -237,6 +285,14 @@ class StatcastIngestor:
         if at_bats_df.empty:
             logger.warning(f"No at_bats for {game_id}, skipping")
             return
+
+        player_ids = set()
+        for ab in game_data["at_bats"]:
+            if ab.get("batter_id"):
+                player_ids.add(ab["batter_id"])
+            if ab.get("pitcher_id"):
+                player_ids.add(ab["pitcher_id"])
+        self._ensure_players(player_ids)
 
         with self.engine.begin() as conn:
             existing = conn.execute(
@@ -252,7 +308,7 @@ class StatcastIngestor:
                 conn.execute(text("""
                     INSERT INTO at_bats
                     SELECT * FROM at_bats_tmp
-                    ON CONFLICT (ab_id) DO UPDATE SET
+                    ON CONFLICT (ab_id, game_id) DO UPDATE SET
                         events = EXCLUDED.events,
                         home_score_after = EXCLUDED.home_score_after,
                         away_score_after = EXCLUDED.away_score_after
@@ -265,7 +321,7 @@ class StatcastIngestor:
 
             if not pitches_df.empty:
                 existing_p = conn.execute(
-                    text("SELECT COUNT(*) FROM pitches WHERE ab_id IN (SELECT ab_id FROM at_bats WHERE game_id = :gid)"),
+                    text("SELECT COUNT(*) FROM pitches WHERE game_id = :gid"),
                     {"gid": game_id},
                 ).scalar()
 
@@ -291,11 +347,11 @@ class StatcastIngestor:
         while current <= end:
             games_df = self.fetch_daily_games(current)
             for _, game in games_df.iterrows():
-                game_pk = game["game_id"]
-                if game["status"] == "FINAL":
+                game_pk = game.get("mlb_game_pk") or game.get("game_id")
+                if game_pk and game["status"] == "FINAL":
                     gid = f"{game['away_team_id']}{game['home_team_id']}{current.strftime('%y%m%d')}"
                     try:
-                        self.ingest_game(game_pk, gid)
+                        self.ingest_game(int(game_pk), gid)
                     except Exception as e:
                         logger.error(f"Failed to ingest {gid}: {e}")
             current += timedelta(days=1)
