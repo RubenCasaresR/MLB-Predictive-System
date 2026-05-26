@@ -1,6 +1,6 @@
 const App = {
   currentPage: '',
-  pageTitleMap: {
+    pageTitleMap: {
     dashboard: 'Dashboard',
     'daily-analysis': '📊 Análisis Diario',
     surebets: '🛡️ Apuestas Seguras',
@@ -11,11 +11,14 @@ const App = {
     history: 'Historial de Apuestas',
     risk: 'Gestión de Riesgo',
     settings: 'Configuración',
+    login: 'Iniciar Sesión',
   },
 
   init() {
+    api.init();
     this.setupNav();
     this.setupRouter();
+    this.setupLogout();
     window.addEventListener('hashchange', () => this.route());
     this.route();
   },
@@ -33,9 +36,35 @@ const App = {
     window.route = (page) => { window.location.hash = page; };
   },
 
+  setupLogout() {
+    document.getElementById('btn-logout')?.addEventListener('click', () => {
+      api.clearToken();
+      window.location.hash = 'login';
+    });
+  },
+
+  updateSidebar() {
+    const loginItem = document.getElementById('nav-login');
+    const userSection = document.getElementById('sidebar-user');
+    const usernameEl = document.getElementById('sidebar-username');
+    if (api.token) {
+      if (loginItem) loginItem.style.display = 'none';
+      if (userSection) userSection.style.display = 'flex';
+      if (usernameEl && api.username) usernameEl.textContent = `👤 ${api.username}`;
+    } else {
+      if (loginItem) loginItem.style.display = 'flex';
+      if (userSection) userSection.style.display = 'none';
+    }
+  },
+
   async route() {
     const hash = window.location.hash.slice(1) || 'dashboard';
     const page = hash.split('?')[0];
+
+    if (page !== 'login' && !api.token) {
+      window.location.hash = 'login';
+      return;
+    }
 
     if (page === this.currentPage) return;
     this.currentPage = page;
@@ -61,6 +90,7 @@ const App = {
         case 'history': await HistoryPage.load(container); break;
         case 'risk': await RiskPage.load(container); break;
         case 'settings': await SettingsPage.load(container); break;
+        case 'login': await LoginPage.load(container); break;
         default:
           container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>Página no encontrada</p></div>';
       }
@@ -70,6 +100,7 @@ const App = {
     }
 
     this.updateActiveNav(page);
+    this.updateSidebar();
   },
 
   updateActiveNav(page) {

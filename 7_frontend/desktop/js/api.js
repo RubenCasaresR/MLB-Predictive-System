@@ -9,14 +9,89 @@ const api = {
   wsUrl: 'ws://localhost:8000/api/v1/alerts/ws',
   alertCallbacks: [],
   wsReconnectTimer: null,
+  token: null,
+  username: null,
+
+  init() {
+    const saved = localStorage.getItem('mlb_token');
+    if (saved) this.token = saved;
+    const savedUser = localStorage.getItem('mlb_username');
+    if (savedUser) this.username = savedUser;
+  },
+
+  setToken(token, username) {
+    this.token = token;
+    this.username = username || null;
+    localStorage.setItem('mlb_token', token);
+    if (username) {
+      localStorage.setItem('mlb_username', username);
+    } else {
+      localStorage.removeItem('mlb_username');
+    }
+  },
+
+  clearToken() {
+    this.token = null;
+    this.username = null;
+    localStorage.removeItem('mlb_token');
+    localStorage.removeItem('mlb_username');
+  },
+
+  async login(username, password) {
+    const body = new URLSearchParams();
+    body.append('username', username);
+    body.append('password', password);
+    const res = await fetch(`${this.baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let detail;
+      try { detail = JSON.parse(text).detail; } catch { detail = text || 'Error al iniciar sesión'; }
+      throw new Error(detail);
+    }
+    const data = await res.json();
+    this.setToken(data.access_token, username);
+    return data;
+  },
+
+  async register(username, password) {
+    const res = await fetch(`${this.baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let detail;
+      try { detail = JSON.parse(text).detail; } catch { detail = text || 'Error al crear cuenta'; }
+      throw new Error(detail);
+    }
+    const data = await res.json();
+    this.setToken(data.access_token, username);
+    return data;
+  },
 
   async fetch(url, options = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (options.headers) {
+      Object.assign(headers, options.headers);
+    }
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
     const res = await fetch(`${this.baseUrl}${url}`, {
-      headers: { 'Content-Type': 'application/json', ...options.headers },
       ...options,
+      headers,
     });
     if (!res.ok) {
       if (res.status === 204) return null;
+      if (res.status === 401 && this.token) {
+        this.clearToken();
+        window.location.hash = 'login';
+      }
       const text = await res.text().catch(() => '');
       let detail;
       try { detail = JSON.parse(text).detail; } catch { detail = text || `Error ${res.status}`; }

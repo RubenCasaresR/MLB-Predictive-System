@@ -124,7 +124,7 @@ const DailyAnalysisPage = {
     }
 
     return { betterPitcher, betterBullpen, betterOffense, betterTeam };
-  }
+  },
 
   _comparisonHtml(game, side, comp) {
     if (!comp.betterTeam) return '';
@@ -138,7 +138,7 @@ const DailyAnalysisPage = {
       `<span class="comp-item ${check('betterOffense') ? 'comp-win' : cross('betterOffense') ? 'comp-loss' : ''}">${check('betterOffense') ? '✅' : cross('betterOffense') ? '❌' : '➖'} Ofensiva</span>`,
     ];
     return `<div class="comparison-details">${items.join('')}</div>`;
-  }
+  },
 
   renderGameCard(game, idx) {
     const hasSim = game.home_win_prob > 0 || game.away_win_prob > 0;
