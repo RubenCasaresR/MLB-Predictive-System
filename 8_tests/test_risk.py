@@ -1,8 +1,10 @@
 """Tests para api/routers/risk.py (125 líneas, 5 endpoints)."""
 
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
 import pytest
-import sys, os
-from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -14,7 +16,8 @@ from api.app import app
 
 def _create_tables(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
@@ -22,12 +25,14 @@ def _create_tables(engine):
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 role TEXT DEFAULT 'user'
             )
-        """))
+        """)
+        )
 
 
 @pytest.fixture(autouse=True)
 def setup_db():
     import tempfile
+
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     db_url = f"sqlite:///{tmp.name}"
@@ -54,12 +59,20 @@ def setup_db():
 def _auth_header(client=None):
     if client is None:
         client = TestClient(app)
-    client.post("/api/v1/auth/register", json={
-        "username": "testuser", "password": "testpass123",
-    })
-    token = client.post("/api/v1/auth/login", data={
-        "username": "testuser", "password": "testpass123",
-    }).json()["access_token"]
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "testuser",
+            "password": "testpass123",
+        },
+    )
+    token = client.post(
+        "/api/v1/auth/login",
+        data={
+            "username": "testuser",
+            "password": "testpass123",
+        },
+    ).json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -92,6 +105,7 @@ MOCK_EXPOSURE_CHECK = {
 # GET /api/v1/risk/bankroll
 # ============================================================================
 
+
 class TestGetBankroll:
     def test_requires_auth(self):
         resp = client.get("/api/v1/risk/bankroll")
@@ -122,6 +136,7 @@ class TestGetBankroll:
 # ============================================================================
 # POST /api/v1/risk/bankroll/update
 # ============================================================================
+
 
 class TestUpdateBankroll:
     def test_requires_auth(self):
@@ -174,6 +189,7 @@ class TestUpdateBankroll:
 # ============================================================================
 # POST /api/v1/risk/exposure/check
 # ============================================================================
+
 
 class TestCheckExposure:
     def test_requires_auth(self):
@@ -229,6 +245,7 @@ class TestCheckExposure:
 # GET /api/v1/risk/limits
 # ============================================================================
 
+
 class TestGetRiskLimits:
     def test_requires_auth(self):
         resp = client.get("/api/v1/risk/limits")
@@ -257,6 +274,7 @@ class TestGetRiskLimits:
 # ============================================================================
 # GET /api/v1/risk/exposure/summary
 # ============================================================================
+
 
 class TestGetExposureSummary:
     def test_requires_auth(self):

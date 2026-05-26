@@ -1,18 +1,21 @@
 """Tests para PersistentBankrollManager con SQLite."""
 
-import pytest
-import sys, os
+import os
+import sys
 from datetime import date
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sqlalchemy import create_engine, text
-from risk.bankroll_manager import PersistentBankrollManager, ExposureLimit
 
+from risk.bankroll_manager import ExposureLimit, PersistentBankrollManager
 
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def db_url():
@@ -22,9 +25,11 @@ def db_url():
 @pytest.fixture
 def bm(db_url):
     from sqlalchemy import create_engine, text
+
     bm = PersistentBankrollManager(initial=10000.0, db_url=db_url, user_id="test")
     with bm.engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS bankroll_state (
                 user_id TEXT PRIMARY KEY,
                 current REAL NOT NULL,
@@ -33,7 +38,8 @@ def bm(db_url):
                 total_profit REAL DEFAULT 0,
                 updated_at TEXT
             )
-        """))
+        """)
+        )
     return bm
 
 
@@ -41,12 +47,15 @@ def bm(db_url):
 # Tests: save_state
 # ============================================================================
 
+
 class TestSaveState:
     def test_persists_bankroll_to_db(self, bm):
         bm.save_state()
         with bm.engine.connect() as conn:
             row = conn.execute(
-                text("SELECT current, peak, total_wagered, total_profit, user_id FROM bankroll_state")
+                text(
+                    "SELECT current, peak, total_wagered, total_profit, user_id FROM bankroll_state"
+                )
             ).fetchone()
         assert row is not None
         assert row[0] == 10000.0
@@ -63,7 +72,9 @@ class TestSaveState:
         bm.save_state()
         with bm.engine.connect() as conn:
             row = conn.execute(
-                text("SELECT current, total_wagered, total_profit FROM bankroll_state WHERE user_id = 'test'")
+                text(
+                    "SELECT current, total_wagered, total_profit FROM bankroll_state WHERE user_id = 'test'"
+                )
             ).fetchone()
         assert round(row[0], 2) == 9500.0
         assert row[2] == -500.0
@@ -91,6 +102,7 @@ class TestSaveState:
 # ============================================================================
 # Tests: check_exposure
 # ============================================================================
+
 
 class TestCheckExposure:
     def test_approved_within_limits(self, bm):
@@ -142,6 +154,7 @@ class TestCheckExposure:
 # Tests: get_bet_slip_summary
 # ============================================================================
 
+
 class TestBetSlipSummary:
     def test_empty_bets(self, bm):
         summary = bm.get_bet_slip_summary([])
@@ -150,20 +163,24 @@ class TestBetSlipSummary:
         assert summary["average_kelly"] == 0
 
     def test_single_bet(self, bm):
-        summary = bm.get_bet_slip_summary([
-            {"recommended_stake": 250, "kelly_fraction": 0.025},
-        ])
+        summary = bm.get_bet_slip_summary(
+            [
+                {"recommended_stake": 250, "kelly_fraction": 0.025},
+            ]
+        )
         assert summary["total_bets"] == 1
         assert summary["total_stake"] == 250.0
         assert summary["stake_pct"] == 2.5
         assert summary["average_kelly"] == 0.025
 
     def test_multiple_bets(self, bm):
-        summary = bm.get_bet_slip_summary([
-            {"recommended_stake": 200, "kelly_fraction": 0.02},
-            {"recommended_stake": 300, "kelly_fraction": 0.03},
-            {"recommended_stake": 150, "kelly_fraction": 0.015},
-        ])
+        summary = bm.get_bet_slip_summary(
+            [
+                {"recommended_stake": 200, "kelly_fraction": 0.02},
+                {"recommended_stake": 300, "kelly_fraction": 0.03},
+                {"recommended_stake": 150, "kelly_fraction": 0.015},
+            ]
+        )
         assert summary["total_bets"] == 3
         assert summary["total_stake"] == 650.0
         assert summary["stake_pct"] == 6.5
@@ -174,6 +191,7 @@ class TestBetSlipSummary:
 # ============================================================================
 # Tests: ExposureLimit
 # ============================================================================
+
 
 class TestExposureLimit:
     def test_defaults(self):

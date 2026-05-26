@@ -1,8 +1,10 @@
 """Tests para api/routers/stats.py (7 endpoints GET)."""
 
+import os
+import sys
+from unittest.mock import ANY, MagicMock, patch
+
 import pytest
-import sys, os
-from unittest.mock import patch, MagicMock, ANY
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -14,7 +16,8 @@ from api.app import app
 
 def _create_tables(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS players (
                 player_id INTEGER PRIMARY KEY,
                 full_name TEXT NOT NULL,
@@ -23,8 +26,10 @@ def _create_tables(engine):
                 bats TEXT,
                 throws TEXT
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS player_rolling_stats (
                 player_id INTEGER,
                 as_of_date TEXT,
@@ -36,8 +41,10 @@ def _create_tables(engine):
                 fatigue_score REAL,
                 PRIMARY KEY (player_id, as_of_date)
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS games (
                 game_id TEXT PRIMARY KEY,
                 game_date TEXT NOT NULL,
@@ -48,8 +55,10 @@ def _create_tables(engine):
                 status TEXT DEFAULT 'SCHEDULED',
                 start_time_et TEXT
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS teams (
                 team_id TEXT PRIMARY KEY,
                 name TEXT,
@@ -57,63 +66,85 @@ def _create_tables(engine):
                 division TEXT,
                 ballpark TEXT
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS at_bats (
                 ab_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pitcher_id INTEGER
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS pitches (
                 p_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ab_id INTEGER,
                 release_speed REAL
             )
-        """))
+        """)
+        )
 
 
 def _seed_data(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO players (player_id, full_name, team_id, position, bats, throws)
             VALUES (1, 'Aaron Judge', 'NYY', 'CF', 'R', 'R')
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO players (player_id, full_name, team_id, position, bats, throws)
             VALUES (2, 'Mookie Betts', 'LAD', 'RF', 'R', 'R')
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO player_rolling_stats
                 (player_id, as_of_date, woba_30d, fip_30d, xera_30d, avg_velo_30d, whiff_pct_30d, fatigue_score)
             VALUES (1, '2026-05-20', 0.412, 3.10, 4.20, 95.5, 12.5, 0.15)
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO games (game_id, game_date, home_team_id, away_team_id,
                                          home_probable_pitcher, away_probable_pitcher,
                                          status, start_time_et)
             VALUES ('2026-05-20-NYY-BOS', '2026-05-20', 'NYY', 'BOS',
                     1, 2, 'SCHEDULED', '19:05')
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO teams (team_id, name, league, division, ballpark)
             VALUES ('NYY', 'New York Yankees', 'AL', 'East', 'Yankee Stadium')
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO teams (team_id, name, league, division, ballpark)
             VALUES ('LAD', 'Los Angeles Dodgers', 'NL', 'West', 'Dodger Stadium')
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO at_bats (ab_id, pitcher_id) VALUES (1, 1)
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO pitches (p_id, ab_id, release_speed) VALUES (1, 1, 95.0)
-        """))
+        """)
+        )
 
 
 @pytest.fixture(autouse=True)
 def setup_db():
     import tempfile
+
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     db_url = f"sqlite:///{tmp.name}"
@@ -145,6 +176,7 @@ client = TestClient(app)
 # Helpers for mocking engine (PostgreSQL-specific SQL)
 # ============================================================================
 
+
 def _make_mock_engine(fetchone_result=None, fetchall_result=None):
     """Create a mock engine that returns the given fetchone/fetchall results."""
     mock_engine = MagicMock()
@@ -161,9 +193,14 @@ def _make_mock_engine(fetchone_result=None, fetchall_result=None):
     return mock_engine
 
 
-def _make_mock_engine_with_extra(fetchone_result=None, fetchall_result=None,
-                                  pitcher_home_result=None, pitcher_away_result=None,
-                                  team_home_result=None, team_away_result=None):
+def _make_mock_engine_with_extra(
+    fetchone_result=None,
+    fetchall_result=None,
+    pitcher_home_result=None,
+    pitcher_away_result=None,
+    team_home_result=None,
+    team_away_result=None,
+):
     """Create a mock engine that returns different results per query text pattern."""
     from unittest.mock import MagicMock
 
@@ -175,30 +212,46 @@ def _make_mock_engine_with_extra(fetchone_result=None, fetchall_result=None,
     def _execute_side_effect(*exec_args, **exec_kwargs):
         sql = exec_args[0] if exec_args else None
         params = exec_args[1] if len(exec_args) > 1 else (exec_kwargs or {})
-        sql_str = str(sql) if hasattr(sql, '__str__') else str(sql)
+        sql_str = str(sql) if hasattr(sql, "__str__") else str(sql)
         mock_res = MagicMock()
         # Match pitcher query by looking at SQL text
-        if 'players p' in sql_str and 'player_rolling_stats' in sql_str:
-            pid = params.get('pid', 0) if isinstance(params, dict) else 0
+        if "players p" in sql_str and "player_rolling_stats" in sql_str:
+            pid = params.get("pid", 0) if isinstance(params, dict) else 0
             if pid == 1:
                 mock_res.fetchone.return_value = pitcher_home_result or (
-                    'Gerrit Cole', 'R', 2.95, 10.2, 5.1, 1.2, 96.8, 30.5, 0.72
+                    "Gerrit Cole",
+                    "R",
+                    2.95,
+                    10.2,
+                    5.1,
+                    1.2,
+                    96.8,
+                    30.5,
+                    0.72,
                 )
             elif pid == 2:
                 mock_res.fetchone.return_value = pitcher_away_result or (
-                    'Clayton Kershaw', 'L', 3.45, 8.2, 7.3, 1.1, 91.2, 25.0, 0.85
+                    "Clayton Kershaw",
+                    "L",
+                    3.45,
+                    8.2,
+                    7.3,
+                    1.1,
+                    91.2,
+                    25.0,
+                    0.85,
                 )
             else:
                 mock_res.fetchone.return_value = None
-        elif 'team_rolling_stats' in sql_str:
-            tid = params.get('tid', '') if isinstance(params, dict) else ''
-            if tid == 'NYY' and team_home_result:
+        elif "team_rolling_stats" in sql_str:
+            tid = params.get("tid", "") if isinstance(params, dict) else ""
+            if tid == "NYY" and team_home_result:
                 mock_res.fetchone.return_value = team_home_result
-            elif tid == 'BOS' and team_away_result:
+            elif tid == "BOS" and team_away_result:
                 mock_res.fetchone.return_value = team_away_result
-            elif tid == 'LAD' and team_home_result:
+            elif tid == "LAD" and team_home_result:
                 mock_res.fetchone.return_value = team_home_result
-            elif tid == 'SFG' and team_away_result:
+            elif tid == "SFG" and team_away_result:
                 mock_res.fetchone.return_value = team_away_result
             else:
                 mock_res.fetchone.return_value = None
@@ -215,6 +268,7 @@ def _make_mock_engine_with_extra(fetchone_result=None, fetchall_result=None,
 # ============================================================================
 # GET /api/v1/stats/players/{player_id}
 # ============================================================================
+
 
 class TestGetPlayerStats:
     def test_returns_player_stats_with_rolling(self):
@@ -253,6 +307,7 @@ class TestGetPlayerStats:
 # ============================================================================
 # GET /api/v1/stats/players
 # ============================================================================
+
 
 class TestListPlayers:
     def test_returns_all_players(self):
@@ -304,29 +359,46 @@ class TestListPlayers:
 # Uses LEFT JOIN LATERAL (PostgreSQL) — mock engine
 # ============================================================================
 
+
 class TestGetGamePreview:
     GAME_PREVIEW_ROW = (
-        "2026-05-20",           # game_date
-        "NYY",                  # home_team_id
-        "BOS",                  # away_team_id
-        1,                      # home_probable_pitcher
-        2,                      # away_probable_pitcher
-        "SCHEDULED",            # status
-        "19:05",                # start_time_et
-        -120,                   # home_moneyline_close
-        100,                    # away_moneyline_close
-        8.5,                    # total_close
-        0.58,                   # home_win_prob
-        0.42,                   # away_win_prob
-        True,                   # sharp_money_flag
-        True,                   # rlm_flag
+        "2026-05-20",  # game_date
+        "NYY",  # home_team_id
+        "BOS",  # away_team_id
+        1,  # home_probable_pitcher
+        2,  # away_probable_pitcher
+        "SCHEDULED",  # status
+        "19:05",  # start_time_et
+        -120,  # home_moneyline_close
+        100,  # away_moneyline_close
+        8.5,  # total_close
+        0.58,  # home_win_prob
+        0.42,  # away_win_prob
+        True,  # sharp_money_flag
+        True,  # rlm_flag
     )
 
     PITCHER_HOME_ROW = (
-        "Gerrit Cole", "R", 2.95, 10.2, 5.1, 1.2, 96.8, 30.5, 0.72,
+        "Gerrit Cole",
+        "R",
+        2.95,
+        10.2,
+        5.1,
+        1.2,
+        96.8,
+        30.5,
+        0.72,
     )
     PITCHER_AWAY_ROW = (
-        "Clayton Kershaw", "L", 3.45, 8.2, 7.3, 1.1, 91.2, 25.0, 0.85,
+        "Clayton Kershaw",
+        "L",
+        3.45,
+        8.2,
+        7.3,
+        1.1,
+        91.2,
+        25.0,
+        0.85,
     )
     TEAM_HOME_ROW = (3.42, 3.80, 0.335)
     TEAM_AWAY_ROW = (4.12, 4.05, 0.312)
@@ -376,9 +448,22 @@ class TestGetGamePreview:
         assert resp.json()["detail"] == "Game not found"
 
     def test_returns_defaults_when_no_market_data(self):
-        minimal_row = ("2026-05-21", "LAD", "SFG", None, None,
-                       "SCHEDULED", "19:10", None, None, None,
-                       0.0, 0.0, None, None)
+        minimal_row = (
+            "2026-05-21",
+            "LAD",
+            "SFG",
+            None,
+            None,
+            "SCHEDULED",
+            "19:10",
+            None,
+            None,
+            None,
+            0.0,
+            0.0,
+            None,
+            None,
+        )
         engine = _make_mock_engine_with_extra(
             fetchone_result=minimal_row,
             pitcher_home_result=None,
@@ -419,18 +504,49 @@ class TestGetGamePreview:
 # Uses LEFT JOIN LATERAL (PostgreSQL) — mock engine
 # ============================================================================
 
+
 class TestListTodaysGames:
     TODAYS_GAMES_ROWS = [
-        ("2026-05-20-NYY-BOS", "2026-05-20", "NYY", "BOS",
-         1, 2, "SCHEDULED", "19:05",
-         -120, 100, 8.5, 0.58, 0.42, True, True),
+        (
+            "2026-05-20-NYY-BOS",
+            "2026-05-20",
+            "NYY",
+            "BOS",
+            1,
+            2,
+            "SCHEDULED",
+            "19:05",
+            -120,
+            100,
+            8.5,
+            0.58,
+            0.42,
+            True,
+            True,
+        ),
     ]
 
     PITCHER_HOME_ROW = (
-        "Gerrit Cole", "R", 2.95, 10.2, 5.1, 1.2, 96.8, 30.5, 0.72,
+        "Gerrit Cole",
+        "R",
+        2.95,
+        10.2,
+        5.1,
+        1.2,
+        96.8,
+        30.5,
+        0.72,
     )
     PITCHER_AWAY_ROW = (
-        "Clayton Kershaw", "L", 3.45, 8.2, 7.3, 1.1, 91.2, 25.0, 0.85,
+        "Clayton Kershaw",
+        "L",
+        3.45,
+        8.2,
+        7.3,
+        1.1,
+        91.2,
+        25.0,
+        0.85,
     )
     TEAM_HOME_ROW = (3.42, 3.80, 0.335)
     TEAM_AWAY_ROW = (4.12, 4.05, 0.312)
@@ -490,6 +606,7 @@ class TestListTodaysGames:
 # GET /api/v1/stats/teams/{team_id}
 # ============================================================================
 
+
 class TestGetTeamStats:
     def test_returns_team_info(self):
         resp = client.get("/api/v1/stats/teams/NYY")
@@ -516,6 +633,7 @@ class TestGetTeamStats:
 # GET /api/v1/stats/pitchers/{pitcher_id}/fatigue
 # Uses lazy import: from features.fatigue_detector import FatigueDetector
 # ============================================================================
+
 
 class TestGetPitcherFatigue:
     def test_returns_fatigue_data(self):
@@ -568,6 +686,7 @@ class TestGetPitcherFatigue:
 # GET /api/v1/stats/market/sharp-money
 # Uses DISTINCT ON (PostgreSQL) — mock engine
 # ============================================================================
+
 
 class TestGetSharpMoneySignals:
     SHARP_MONEY_ROWS = [

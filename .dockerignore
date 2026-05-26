@@ -1,0 +1,44 @@
+# =============================================================================
+# .dockerignore — MLB Predictive System
+# =============================================================================
+
+# Version control
+.git
+.gitignore
+
+# Python
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Data & artifacts
+data
+logs
+models
+htmlcov
+.coverage
+coverage.xml
+
+# Node (frontend)
+node_modules
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

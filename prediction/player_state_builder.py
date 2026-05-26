@@ -1,8 +1,9 @@
 """Construye BatterState/PitcherState desde la base de datos."""
 
 import logging
-from typing import List, Tuple
 from datetime import date
+from typing import List, Tuple
+
 from sqlalchemy import create_engine, text
 
 from prediction.monte_carlo_simulator import BatterState, PitcherState
@@ -30,6 +31,7 @@ def _fetch_pitcher_state(engine, pitcher_id: int, target_date: date) -> PitcherS
                        prs.hr_per_9_30d, prs.whiff_pct_30d,
                        prs.avg_velo_30d, prs.avg_spin_30d,
                        prs.days_rested, prs.pitches_last_7d,
+                       prs.k_per_9_30d, prs.bb_per_9_30d, prs.fip_30d,
                        p.throws, p.full_name
                 FROM player_rolling_stats prs
                 JOIN players p ON p.player_id = prs.player_id
@@ -43,7 +45,21 @@ def _fetch_pitcher_state(engine, pitcher_id: int, target_date: date) -> PitcherS
         row = result.fetchone()
 
     if row:
-        k_pct, bb_pct, hr_per_9, whiff_pct, velo, spin, days_rested, pitches_l7, throws, name = row
+        (
+            k_pct,
+            bb_pct,
+            hr_per_9,
+            whiff_pct,
+            velo,
+            spin,
+            days_rested,
+            pitches_l7,
+            k_9,
+            bb_9,
+            fip,
+            throws,
+            name,
+        ) = row
         name = name or f"Pitcher_{pitcher_id}"
         k_rate = (float(k_pct) if k_pct is not None else _LEAGUE_AVG_K_RATE * 100) / 100.0
         bb_rate = (float(bb_pct) if bb_pct is not None else _LEAGUE_AVG_BB_RATE * 100) / 100.0
@@ -53,6 +69,9 @@ def _fetch_pitcher_state(engine, pitcher_id: int, target_date: date) -> PitcherS
         avg_spin = float(spin) if spin is not None else _LEAGUE_AVG_SPIN
         rest = int(days_rested) if days_rested is not None else 0
         p7 = int(pitches_l7) if pitches_l7 is not None else 0
+        k_per_9 = float(k_9) if k_9 is not None else 8.0
+        bb_per_9 = float(bb_9) if bb_9 is not None else 3.0
+        fip_val = float(fip) if fip is not None else 4.50
         fatigue = 1.0
         if rest < 4:
             fatigue -= (4 - rest) * 0.05
@@ -69,6 +88,9 @@ def _fetch_pitcher_state(engine, pitcher_id: int, target_date: date) -> PitcherS
         avg_velo = _LEAGUE_AVG_VELO
         avg_spin = _LEAGUE_AVG_SPIN
         fatigue = 1.0
+        k_per_9 = 8.0
+        bb_per_9 = 3.0
+        fip_val = 4.50
 
     return PitcherState(
         player_id=pitcher_id,
@@ -81,10 +103,16 @@ def _fetch_pitcher_state(engine, pitcher_id: int, target_date: date) -> PitcherS
         avg_velo=round(avg_velo, 1),
         avg_spin=round(avg_spin, 1),
         fatigue_factor=round(fatigue, 3),
+        k_per_9_30d=round(k_per_9, 1),
+        bb_per_9_30d=round(bb_per_9, 1),
+        hr_per_9_30d=round(hr_rate, 1),
+        fip_30d=round(fip_val, 2),
+        avg_velo_30d=round(avg_velo, 1),
+        whiff_pct_30d=round(whiff * 100, 1),
     )
 
 
-def _fetch_team_lineup(engine, team_id: str, target_date: date) -> List[BatterState]:
+def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterState]:
     rows = []
     with engine.connect() as conn:
         result = conn.execute(
@@ -92,6 +120,7 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> List[BatterSt
                 SELECT brs.player_id, brs.woba_30d, brs.k_pct_30d,
                        brs.bb_pct_30d, brs.hr_per_9_30d,
                        brs.groundball_pct_30d, brs.flyball_pct_30d,
+                       brs.slg_30d, brs.hard_hit_pct_30d, brs.barrel_pct_30d,
                        p.bats, p.full_name
                 FROM batter_rolling_stats brs
                 JOIN players p ON p.player_id = brs.player_id
@@ -111,8 +140,18 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> List[BatterSt
 
     lineups = []
     for (
-        pid, woba_30d, k_pct, bb_pct, hr_per_9,
-        gb_pct, fb_pct, bats, name,
+        pid,
+        woba_30d,
+        k_pct,
+        bb_pct,
+        hr_per_9,
+        gb_pct,
+        fb_pct,
+        slg_30d,
+        hard_hit_pct,
+        barrel_pct,
+        bats,
+        name,
     ) in rows:
         name = name or f"Player_{pid}"
         k_rate = (float(k_pct) if k_pct is not None else _LEAGUE_AVG_K_RATE * 100) / 100.0
@@ -120,32 +159,49 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> List[BatterSt
         hr_rate = float(hr_per_9) if hr_per_9 is not None else _LEAGUE_AVG_HR_RATE
         gb_rate = (float(gb_pct) if gb_pct is not None else _LEAGUE_AVG_GB_RATE * 100) / 100.0
         fb_rate = (float(fb_pct) if fb_pct is not None else _LEAGUE_AVG_FB_RATE * 100) / 100.0
+        slg_val = float(slg_30d) if slg_30d is not None else 0.400
+        hh_val = float(hard_hit_pct) if hard_hit_pct is not None else 38.0
+        bar_val = float(barrel_pct) if barrel_pct is not None else 8.0
 
         woba_vs = float(woba_30d) if woba_30d is not None else _LEAGUE_AVG_WOBA
-        lineups.append(BatterState(
-            player_id=pid,
-            name=name,
-            bats=bats or "R",
-            woba_vs_rhp=round(woba_vs, 3),
-            woba_vs_lhp=round(woba_vs * 0.95, 3),
-            k_rate=round(k_rate, 3),
-            bb_rate=round(bb_rate, 3),
-            hr_rate=round(hr_rate, 3),
-            groundball_rate=round(gb_rate, 3),
-            flyball_rate=round(fb_rate, 3),
-        ))
+        lineups.append(
+            BatterState(
+                player_id=pid,
+                name=name,
+                bats=bats or "R",
+                woba_vs_rhp=round(woba_vs, 3),
+                woba_vs_lhp=round(woba_vs * 0.95, 3),
+                k_rate=round(k_rate, 3),
+                bb_rate=round(bb_rate, 3),
+                hr_rate=round(hr_rate, 3),
+                groundball_rate=round(gb_rate, 3),
+                flyball_rate=round(fb_rate, 3),
+                woba_30d=round(woba_vs, 3),
+                k_pct_30d=round(k_rate * 100, 1),
+                bb_pct_30d=round(bb_rate * 100, 1),
+                slg_30d=round(slg_val, 3),
+                hard_hit_pct_30d=round(hh_val, 1),
+                barrel_pct_30d=round(bar_val, 1),
+            )
+        )
 
     return lineups
 
 
-def _build_placeholder_lineup(team_id: str, team_woba: float, count: int = 9) -> List[BatterState]:
+def _build_placeholder_lineup(team_id: str, team_woba: float, count: int = 9) -> list[BatterState]:
     return [
         BatterState(
             player_id=-(hash(team_id) % 10000 + i),
-            name=f"{team_id}_Batter_{i+1}",
+            name=f"{team_id}_Batter_{i + 1}",
             bats=("L" if i % 3 == 0 else "R"),
             woba_vs_rhp=round(team_woba, 3),
             woba_vs_lhp=round(team_woba * 0.95, 3),
+            woba_30d=round(team_woba, 3),
+            k_pct_30d=22.0,
+            bb_pct_30d=8.5,
+            slg_30d=0.400,
+            hard_hit_pct_30d=38.0,
+            barrel_pct_30d=8.0,
         )
         for i in range(count)
     ]
@@ -171,11 +227,14 @@ def _fetch_team_avg_woba(engine, team_id: str, target_date: date) -> float:
 
 
 def build_player_states_from_db(
-    engine, game_id: str,
-    home_team_id: str, away_team_id: str,
-    home_pitcher_id: int, away_pitcher_id: int,
+    engine,
+    game_id: str,
+    home_team_id: str,
+    away_team_id: str,
+    home_pitcher_id: int,
+    away_pitcher_id: int,
     target_date: date,
-) -> Tuple[List[BatterState], List[BatterState], PitcherState, PitcherState]:
+) -> tuple[list[BatterState], list[BatterState], PitcherState, PitcherState]:
 
     home_pitcher = _fetch_pitcher_state(engine, home_pitcher_id, target_date)
     away_pitcher = _fetch_pitcher_state(engine, away_pitcher_id, target_date)
@@ -188,8 +247,7 @@ def build_player_states_from_db(
         needed = 9 - len(home_lineup)
         home_lineup.extend(_build_placeholder_lineup(home_team_id, team_woba, needed))
         logger.info(
-            f"Filled {needed} placeholder batters for {home_team_id} "
-            f"(team wOBA={team_woba:.3f})"
+            f"Filled {needed} placeholder batters for {home_team_id} (team wOBA={team_woba:.3f})"
         )
 
     if len(away_lineup) < 9:
@@ -197,8 +255,7 @@ def build_player_states_from_db(
         needed = 9 - len(away_lineup)
         away_lineup.extend(_build_placeholder_lineup(away_team_id, team_woba, needed))
         logger.info(
-            f"Filled {needed} placeholder batters for {away_team_id} "
-            f"(team wOBA={team_woba:.3f})"
+            f"Filled {needed} placeholder batters for {away_team_id} (team wOBA={team_woba:.3f})"
         )
 
     return home_lineup, away_lineup, home_pitcher, away_pitcher

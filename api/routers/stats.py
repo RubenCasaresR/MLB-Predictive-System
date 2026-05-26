@@ -4,19 +4,23 @@
 # Rubén Eduardo Casares Rosales - MLB Predictive System
 # =============================================================================
 
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import text
 import logging
 import os
-import requests as http_requests
-from datetime import date as d, datetime, timezone
+from datetime import UTC, datetime, timezone
+from datetime import date as d
+from typing import List, Optional
 from zoneinfo import ZoneInfo
+
+import requests as http_requests
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import text
 
 from api.database import get_engine
 from api.models.pydantic_models import (
-    PlayerStatsResponse, GamePreviewResponse,
-    PitcherPreviewStats, BullpenPreviewStats,
+    BullpenPreviewStats,
+    GamePreviewResponse,
+    PitcherPreviewStats,
+    PlayerStatsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +36,8 @@ def _get_pitcher_stats(engine, pitcher_id) -> dict:
     except (ValueError, TypeError):
         return {}
     with engine.connect() as conn:
-        row = conn.execute(text("""
+        row = conn.execute(
+            text("""
             SELECT p.full_name, p.throws,
                    prs.fip_30d, prs.k_per_9_30d, prs.bb_per_9_30d,
                    prs.hr_per_9_30d, prs.avg_velo_30d, prs.whiff_pct_30d,
@@ -44,7 +49,9 @@ def _get_pitcher_stats(engine, pitcher_id) -> dict:
                 ORDER BY as_of_date DESC LIMIT 1
             ) prs ON TRUE
             WHERE p.player_id = :pid
-        """), {"pid": pid}).fetchone()
+        """),
+            {"pid": pid},
+        ).fetchone()
     if not row:
         return {}
     return {
@@ -65,12 +72,15 @@ def _get_team_stats(engine, team_id) -> dict:
     if not team_id:
         return {}
     with engine.connect() as conn:
-        row = conn.execute(text("""
+        row = conn.execute(
+            text("""
             SELECT bullpen_era_30d, bullpen_fip_30d, woba_30d
             FROM team_rolling_stats
             WHERE team_id = :tid
             ORDER BY as_of_date DESC LIMIT 1
-        """), {"tid": team_id}).fetchone()
+        """),
+            {"tid": team_id},
+        ).fetchone()
     if not row:
         return {}
     return {
@@ -80,9 +90,14 @@ def _get_team_stats(engine, team_id) -> dict:
     }
 
 
-def _compute_comparisons(home_pitcher: dict, away_pitcher: dict,
-                          home_team_stats: dict, away_team_stats: dict,
-                          home_win_prob: float, away_win_prob: float) -> dict:
+def _compute_comparisons(
+    home_pitcher: dict,
+    away_pitcher: dict,
+    home_team_stats: dict,
+    away_team_stats: dict,
+    home_win_prob: float,
+    away_win_prob: float,
+) -> dict:
     """Determina qué equipo es mejor en cada categoría"""
     better_pitcher = ""
     if home_pitcher.get("fip") is not None and away_pitcher.get("fip") is not None:
@@ -119,12 +134,12 @@ def _compute_comparisons(home_pitcher: dict, away_pitcher: dict,
         else:
             better_team = "away"
     else:
-        home_wins = sum([
-            1 for c in [better_pitcher, better_bullpen, better_offense] if c == "home"
-        ])
-        away_wins = sum([
-            1 for c in [better_pitcher, better_bullpen, better_offense] if c == "away"
-        ])
+        home_wins = sum(
+            [1 for c in [better_pitcher, better_bullpen, better_offense] if c == "home"]
+        )
+        away_wins = sum(
+            [1 for c in [better_pitcher, better_bullpen, better_offense] if c == "away"]
+        )
         if home_wins > away_wins:
             better_team = "home"
         elif away_wins > home_wins:
@@ -155,7 +170,7 @@ def _to_local_tz(dt_str: str) -> str:
                 dt = datetime.fromisoformat(dt_str)
         # Si es naive, asumir UTC
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         # Convertir a zona objetivo y devolver ISO con offset
         target_tz = ZoneInfo(tz_name)
         dt_local = dt.astimezone(target_tz)
@@ -170,8 +185,10 @@ async def get_player_stats(player_id: int):
     engine = get_engine()
     with engine.connect() as conn:
         row = conn.execute(
-            text("SELECT player_id, full_name, team_id, position, bats, throws "
-                 "FROM players WHERE player_id = :pid"),
+            text(
+                "SELECT player_id, full_name, team_id, position, bats, throws "
+                "FROM players WHERE player_id = :pid"
+            ),
             {"pid": player_id},
         ).fetchone()
 
@@ -179,11 +196,13 @@ async def get_player_stats(player_id: int):
             raise HTTPException(status_code=404, detail="Player not found")
 
         stats_row = conn.execute(
-            text("SELECT woba_30d, fip_30d, xera_30d, avg_velo_30d, "
-                 "whiff_pct_30d, fatigue_score "
-                 "FROM player_rolling_stats "
-                 "WHERE player_id = :pid "
-                 "ORDER BY as_of_date DESC LIMIT 1"),
+            text(
+                "SELECT woba_30d, fip_30d, xera_30d, avg_velo_30d, "
+                "whiff_pct_30d, fatigue_score "
+                "FROM player_rolling_stats "
+                "WHERE player_id = :pid "
+                "ORDER BY as_of_date DESC LIMIT 1"
+            ),
             {"pid": player_id},
         ).fetchone()
 
@@ -203,10 +222,10 @@ async def get_player_stats(player_id: int):
     )
 
 
-@router.get("/players", response_model=List[PlayerStatsResponse])
+@router.get("/players", response_model=list[PlayerStatsResponse])
 async def list_players(
-    team_id: Optional[str] = Query(None),
-    position: Optional[str] = Query(None),
+    team_id: str | None = Query(None),
+    position: str | None = Query(None),
 ):
     engine = get_engine()
     query = "SELECT player_id, full_name, team_id FROM players WHERE 1=1"
@@ -223,8 +242,7 @@ async def list_players(
         rows = conn.execute(text(query), params).fetchall()
 
     return [
-        PlayerStatsResponse(player_id=r[0], full_name=r[1] or "", team_id=r[2] or "")
-        for r in rows
+        PlayerStatsResponse(player_id=r[0], full_name=r[1] or "", team_id=r[2] or "") for r in rows
     ]
 
 
@@ -300,9 +318,10 @@ async def get_game_preview(game_id: str):
     )
 
 
-@router.get("/preview", response_model=List[GamePreviewResponse])
-async def list_todays_games(date: Optional[str] = Query(None)):
+@router.get("/preview", response_model=list[GamePreviewResponse])
+async def list_todays_games(date: str | None = Query(None)):
     from datetime import date as d
+
     target = date or d.today().isoformat()
 
     engine = get_engine()
@@ -349,25 +368,36 @@ async def list_todays_games(date: Optional[str] = Query(None)):
         away_wp = float(r[12]) if r[12] is not None else 0
         comp = _compute_comparisons(hp, ap, ht, at, home_wp, away_wp)
 
-        results.append(GamePreviewResponse(
-            game_id=r[0], game_date=str(r[1]) or "",
-            home_team=home_team, away_team=away_team,
-            home_pitcher_id=home_pitcher_id, away_pitcher_id=away_pitcher_id,
-            status=r[6] or "", start_time=_to_local_tz(str(r[7])) if r[7] else "",
-            home_moneyline=r[8], away_moneyline=r[9],
-            total=float(r[10]) if r[10] else None,
-            home_win_prob=home_wp,
-            away_win_prob=away_wp,
-            sharp_money_flag=bool(r[13]) if r[13] else False,
-            rlm_flag=bool(r[14]) if r[14] else False,
-            home_pitcher=PitcherPreviewStats(**hp),
-            away_pitcher=PitcherPreviewStats(**ap),
-            home_bullpen=BullpenPreviewStats(era=ht.get("bullpen_era"), fip=ht.get("bullpen_fip")),
-            away_bullpen=BullpenPreviewStats(era=at.get("bullpen_era"), fip=at.get("bullpen_fip")),
-            home_woba=ht.get("woba"),
-            away_woba=at.get("woba"),
-            **comp,
-        ))
+        results.append(
+            GamePreviewResponse(
+                game_id=r[0],
+                game_date=str(r[1]) or "",
+                home_team=home_team,
+                away_team=away_team,
+                home_pitcher_id=home_pitcher_id,
+                away_pitcher_id=away_pitcher_id,
+                status=r[6] or "",
+                start_time=_to_local_tz(str(r[7])) if r[7] else "",
+                home_moneyline=r[8],
+                away_moneyline=r[9],
+                total=float(r[10]) if r[10] else None,
+                home_win_prob=home_wp,
+                away_win_prob=away_wp,
+                sharp_money_flag=bool(r[13]) if r[13] else False,
+                rlm_flag=bool(r[14]) if r[14] else False,
+                home_pitcher=PitcherPreviewStats(**hp),
+                away_pitcher=PitcherPreviewStats(**ap),
+                home_bullpen=BullpenPreviewStats(
+                    era=ht.get("bullpen_era"), fip=ht.get("bullpen_fip")
+                ),
+                away_bullpen=BullpenPreviewStats(
+                    era=at.get("bullpen_era"), fip=at.get("bullpen_fip")
+                ),
+                home_woba=ht.get("woba"),
+                away_woba=at.get("woba"),
+                **comp,
+            )
+        )
 
     return results
 
@@ -384,14 +414,20 @@ async def get_team_stats(team_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="Team not found")
 
-    return {"team_id": team_id, "name": row[0], "league": row[1],
-            "division": row[2], "ballpark": row[3]}
+    return {
+        "team_id": team_id,
+        "name": row[0],
+        "league": row[1],
+        "division": row[2],
+        "ballpark": row[3],
+    }
 
 
 @router.get("/pitchers/{pitcher_id}/fatigue")
 async def get_pitcher_fatigue(pitcher_id: int):
-    from features.fatigue_detector import FatigueDetector
     from datetime import date, timedelta
+
+    from features.fatigue_detector import FatigueDetector
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -430,7 +466,7 @@ async def get_pitcher_fatigue(pitcher_id: int):
 
 @router.get("/market/sharp-money")
 async def get_sharp_money_signals(
-    game_id: Optional[str] = Query(None),
+    game_id: str | None = Query(None),
     min_confidence: float = Query(0.5, ge=0.0, le=1.0),
 ):
     engine = get_engine()
@@ -456,7 +492,8 @@ async def get_sharp_money_signals(
 
     return [
         {"game_id": r[0], "signal_type": r[1], "confidence": min_confidence}
-        for r in rows if r[1] != "NONE"
+        for r in rows
+        if r[1] != "NONE"
     ]
 
 
@@ -472,22 +509,37 @@ MLB_TEAMS_URL = "https://statsapi.mlb.com/api/v1/teams"
 def _short_team_name(name: str) -> str:
     """Extrae código corto del nombre del equipo (Cleveland Guardians → CLE)"""
     name_map = {
-        "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL",
-        "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS",
-        "Chicago Cubs": "CHC", "Chicago White Sox": "CHW",
-        "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE",
-        "Colorado Rockies": "COL", "Detroit Tigers": "DET",
-        "Houston Astros": "HOU", "Kansas City Royals": "KC",
-        "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD",
-        "Miami Marlins": "MIA", "Milwaukee Brewers": "MIL",
-        "Minnesota Twins": "MIN", "New York Yankees": "NYY",
-        "New York Mets": "NYM", "Oakland Athletics": "OAK",
+        "Arizona Diamondbacks": "ARI",
+        "Atlanta Braves": "ATL",
+        "Baltimore Orioles": "BAL",
+        "Boston Red Sox": "BOS",
+        "Chicago Cubs": "CHC",
+        "Chicago White Sox": "CHW",
+        "Cincinnati Reds": "CIN",
+        "Cleveland Guardians": "CLE",
+        "Colorado Rockies": "COL",
+        "Detroit Tigers": "DET",
+        "Houston Astros": "HOU",
+        "Kansas City Royals": "KC",
+        "Los Angeles Angels": "LAA",
+        "Los Angeles Dodgers": "LAD",
+        "Miami Marlins": "MIA",
+        "Milwaukee Brewers": "MIL",
+        "Minnesota Twins": "MIN",
+        "New York Yankees": "NYY",
+        "New York Mets": "NYM",
+        "Oakland Athletics": "OAK",
         "Athletics": "OAK",
-        "Philadelphia Phillies": "PHI", "Pittsburgh Pirates": "PIT",
-        "San Diego Padres": "SD", "San Francisco Giants": "SF",
-        "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL",
-        "Tampa Bay Rays": "TB", "Texas Rangers": "TEX",
-        "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
+        "Philadelphia Phillies": "PHI",
+        "Pittsburgh Pirates": "PIT",
+        "San Diego Padres": "SD",
+        "San Francisco Giants": "SF",
+        "Seattle Mariners": "SEA",
+        "St. Louis Cardinals": "STL",
+        "Tampa Bay Rays": "TB",
+        "Texas Rangers": "TEX",
+        "Toronto Blue Jays": "TOR",
+        "Washington Nationals": "WSH",
     }
     return name_map.get(name, name.split()[-1][:3].upper())
 
@@ -538,7 +590,7 @@ def _parse_mlb_game(game: dict) -> dict:
 
 
 @router.get("/live/schedule")
-async def get_live_schedule(date: Optional[str] = None):
+async def get_live_schedule(date: str | None = None):
     """Obtiene el calendario en vivo desde la API pública de MLB"""
     target = date or d.today().isoformat()
     try:

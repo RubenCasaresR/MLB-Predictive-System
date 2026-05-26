@@ -1,5 +1,6 @@
-import os
 import functools
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 

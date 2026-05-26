@@ -14,20 +14,23 @@
 #   5. Upsert en base de datos
 # =============================================================================
 
-import os
-import json
 import csv
-from typing import Dict, List, Optional, Generator, Set
+import json
+import logging
+import os
+from collections.abc import Generator
 from datetime import date, datetime, timedelta
-import pandas as pd
+from typing import Dict, List, Optional, Set
+
 import numpy as np
+import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
-import logging
 
 logger = logging.getLogger(__name__)
 
 from etl.retry import with_retry
+
 
 class StatcastIngestor:
     def __init__(self, db_url: str):
@@ -39,14 +42,20 @@ class StatcastIngestor:
         logger.info("StatcastIngestor initialized")
 
     @staticmethod
-    def _normalize_team_map(raw: Dict[int, str]) -> Dict[int, str]:
+    def _normalize_team_map(raw: dict[int, str]) -> dict[int, str]:
         fix = {
-            "ATH": "OAK", "SD": "SDP", "SF": "SFG", "AZ": "ARI",
-            "CWS": "CHW", "WSH": "WSN", "KC": "KCR", "TB": "TBR",
+            "ATH": "OAK",
+            "SD": "SDP",
+            "SF": "SFG",
+            "AZ": "ARI",
+            "CWS": "CHW",
+            "WSH": "WSN",
+            "KC": "KCR",
+            "TB": "TBR",
         }
         return {tid: fix.get(abbr, abbr) for tid, abbr in raw.items()}
 
-    def _fetch_team_map(self) -> Dict[int, str]:
+    def _fetch_team_map(self) -> dict[int, str]:
         try:
             resp = requests.get(f"{self.base_url}/teams?sportId=1", timeout=15)
             resp.raise_for_status()
@@ -71,9 +80,7 @@ class StatcastIngestor:
         return mapping.get(detailed_state, detailed_state.upper().replace(" ", "_"))
 
     @with_retry()
-    def fetch_daily_games(
-        self, game_date: Optional[date] = None
-    ) -> pd.DataFrame:
+    def fetch_daily_games(self, game_date: date | None = None) -> pd.DataFrame:
         if game_date is None:
             game_date = date.today()
 
@@ -91,46 +98,73 @@ class StatcastIngestor:
 
         games = []
         default_map = {
-            "New York Yankees": "NYY", "Boston Red Sox": "BOS",
-            "Los Angeles Dodgers": "LAD", "Houston Astros": "HOU",
-            "Atlanta Braves": "ATL", "New York Mets": "NYM",
-            "Philadelphia Phillies": "PHI", "San Diego Padres": "SDP",
-            "St. Louis Cardinals": "STL", "Chicago Cubs": "CHC",
-            "San Francisco Giants": "SFG", "Toronto Blue Jays": "TOR",
-            "Milwaukee Brewers": "MIL", "Baltimore Orioles": "BAL",
-            "Tampa Bay Rays": "TBR", "Seattle Mariners": "SEA",
-            "Texas Rangers": "TEX", "Cleveland Guardians": "CLE",
-            "Minnesota Twins": "MIN", "Arizona Diamondbacks": "ARI",
-            "Cincinnati Reds": "CIN", "Miami Marlins": "MIA",
-            "Kansas City Royals": "KCR", "Chicago White Sox": "CHW",
-            "Detroit Tigers": "DET", "Colorado Rockies": "COL",
-            "Pittsburgh Pirates": "PIT", "Los Angeles Angels": "LAA",
-            "Oakland Athletics": "OAK", "Washington Nationals": "WSN",
+            "New York Yankees": "NYY",
+            "Boston Red Sox": "BOS",
+            "Los Angeles Dodgers": "LAD",
+            "Houston Astros": "HOU",
+            "Atlanta Braves": "ATL",
+            "New York Mets": "NYM",
+            "Philadelphia Phillies": "PHI",
+            "San Diego Padres": "SDP",
+            "St. Louis Cardinals": "STL",
+            "Chicago Cubs": "CHC",
+            "San Francisco Giants": "SFG",
+            "Toronto Blue Jays": "TOR",
+            "Milwaukee Brewers": "MIL",
+            "Baltimore Orioles": "BAL",
+            "Tampa Bay Rays": "TBR",
+            "Seattle Mariners": "SEA",
+            "Texas Rangers": "TEX",
+            "Cleveland Guardians": "CLE",
+            "Minnesota Twins": "MIN",
+            "Arizona Diamondbacks": "ARI",
+            "Cincinnati Reds": "CIN",
+            "Miami Marlins": "MIA",
+            "Kansas City Royals": "KCR",
+            "Chicago White Sox": "CHW",
+            "Detroit Tigers": "DET",
+            "Colorado Rockies": "COL",
+            "Pittsburgh Pirates": "PIT",
+            "Los Angeles Angels": "LAA",
+            "Oakland Athletics": "OAK",
+            "Washington Nationals": "WSN",
         }
         for date_entry in data.get("dates", []):
             for game in date_entry.get("games", []):
                 home_team_id = game["teams"]["home"]["team"]["id"]
                 away_team_id = game["teams"]["away"]["team"]["id"]
-                home_abbr = self._team_id_to_abbr.get(home_team_id) or default_map.get(game["teams"]["home"]["team"]["name"], game["teams"]["home"]["team"]["name"][:3].upper())
-                away_abbr = self._team_id_to_abbr.get(away_team_id) or default_map.get(game["teams"]["away"]["team"]["name"], game["teams"]["away"]["team"]["name"][:3].upper())
+                home_abbr = self._team_id_to_abbr.get(home_team_id) or default_map.get(
+                    game["teams"]["home"]["team"]["name"],
+                    game["teams"]["home"]["team"]["name"][:3].upper(),
+                )
+                away_abbr = self._team_id_to_abbr.get(away_team_id) or default_map.get(
+                    game["teams"]["away"]["team"]["name"],
+                    game["teams"]["away"]["team"]["name"][:3].upper(),
+                )
                 gid = f"{away_abbr}{home_abbr}{game_date.strftime('%y%m%d')}"
-                games.append({
-                    "game_id": gid,
-                    "mlb_game_pk": game.get("gamePk"),
-                    "game_date": game_date.isoformat(),
-                    "home_team_id": home_abbr,
-                    "away_team_id": away_abbr,
-                    "home_probable_pitcher": game["teams"]["home"].get("probablePitcher", {}).get("id"),
-                    "away_probable_pitcher": game["teams"]["away"].get("probablePitcher", {}).get("id"),
-                    "status": self._map_status(game["status"]["detailedState"]),
-                    "venue_id": game.get("venue", {}).get("id"),
-                    "start_time_et": game.get("gameDate"),
-                })
+                games.append(
+                    {
+                        "game_id": gid,
+                        "mlb_game_pk": game.get("gamePk"),
+                        "game_date": game_date.isoformat(),
+                        "home_team_id": home_abbr,
+                        "away_team_id": away_abbr,
+                        "home_probable_pitcher": game["teams"]["home"]
+                        .get("probablePitcher", {})
+                        .get("id"),
+                        "away_probable_pitcher": game["teams"]["away"]
+                        .get("probablePitcher", {})
+                        .get("id"),
+                        "status": self._map_status(game["status"]["detailedState"]),
+                        "venue_id": game.get("venue", {}).get("id"),
+                        "start_time_et": game.get("gameDate"),
+                    }
+                )
 
         return pd.DataFrame(games)
 
     @with_retry(max_retries=3, base_delay=2.0)
-    def fetch_game_playbyplay(self, game_pk: int) -> Dict:
+    def fetch_game_playbyplay(self, game_pk: int) -> dict:
         url = f"{self.base_url_v11}/game/{game_pk}/feed/live"
 
         logger.info(f"Fetching play-by-play for game {game_pk}")
@@ -139,7 +173,7 @@ class StatcastIngestor:
         data = resp.json()
         return data.get("liveData", {}).get("plays", {})
 
-    def parse_playbyplay(self, raw_data: Dict, game_id: str) -> Dict:
+    def parse_playbyplay(self, raw_data: dict, game_id: str) -> dict:
         at_bats = []
         pitches = []
         prev_home_score = 0
@@ -174,8 +208,14 @@ class StatcastIngestor:
 
         return {"at_bats": at_bats, "pitches": pitches}
 
-    def _parse_at_bat(self, play: Dict, game_id: str, at_bat_index: int,
-                      prev_home_score: int = 0, prev_away_score: int = 0) -> Optional[Dict]:
+    def _parse_at_bat(
+        self,
+        play: dict,
+        game_id: str,
+        at_bat_index: int,
+        prev_home_score: int = 0,
+        prev_away_score: int = 0,
+    ) -> dict | None:
         try:
             result = play.get("result", {})
             matchup = play.get("matchup", {})
@@ -184,8 +224,14 @@ class StatcastIngestor:
             count = play.get("count", {})
             event = result.get("event")
             is_ab = result.get("isOut") is not None
-            non_woba = event in ("intentional_walk", "sac_bunt", "sac_fly", "sac_fly_double_play",
-                                 "catcher_interference", "fielders_choice_out")
+            non_woba = event in (
+                "intentional_walk",
+                "sac_bunt",
+                "sac_fly",
+                "sac_fly_double_play",
+                "catcher_interference",
+                "fielders_choice_out",
+            )
             return {
                 "ab_id": at_bat_index,
                 "game_id": game_id,
@@ -213,7 +259,7 @@ class StatcastIngestor:
             logger.warning(f"Error parsing at_bat: {e}")
             return None
 
-    def _parse_pitch(self, pitch: Dict, ab_id: int, game_id: str) -> Optional[Dict]:
+    def _parse_pitch(self, pitch: dict, ab_id: int, game_id: str) -> dict | None:
         try:
             return {
                 "ab_id": ab_id,
@@ -240,7 +286,7 @@ class StatcastIngestor:
             logger.warning(f"Error parsing pitch: {e}")
             return None
 
-    def _get_bases_code(self, before_pitch: Dict) -> str:
+    def _get_bases_code(self, before_pitch: dict) -> str:
         bases = []
         for base in ["first", "second", "third"]:
             bases.append("1" if before_pitch.get(f"{base}Base") else "0")
@@ -253,10 +299,13 @@ class StatcastIngestor:
         placeholders = ",".join(f":id_{i}" for i in range(len(ids_list)))
         params = {f"id_{i}": pid for i, pid in enumerate(ids_list)}
         with self.engine.connect() as conn:
-            existing = {r[0] for r in conn.execute(
-                text(f"SELECT player_id FROM players WHERE player_id IN ({placeholders})"),
-                params,
-            ).fetchall()}
+            existing = {
+                r[0]
+                for r in conn.execute(
+                    text(f"SELECT player_id FROM players WHERE player_id IN ({placeholders})"),
+                    params,
+                ).fetchall()
+            }
         missing = player_ids - set(existing)
         if not missing:
             return
@@ -271,22 +320,25 @@ class StatcastIngestor:
                 p = people[0]
                 pos = (p.get("primaryPosition") or {}).get("abbreviation")
                 with self.engine.begin() as conn:
-                    conn.execute(text("""
+                    conn.execute(
+                        text("""
                         INSERT INTO players (player_id, full_name, primary_position, bats, throws, status)
                         VALUES (:pid, :name, :pos, :bats, :throws, :status)
                         ON CONFLICT (player_id) DO NOTHING
-                    """), {
-                        "pid": pid,
-                        "name": p.get("fullName", f"Player {pid}"),
-                        "pos": pos,
-                        "bats": (p.get("batSide") or {}).get("code"),
-                        "throws": (p.get("pitchHand") or {}).get("code"),
-                        "status": (p.get("status") or {}).get("code"),
-                    })
+                    """),
+                        {
+                            "pid": pid,
+                            "name": p.get("fullName", f"Player {pid}"),
+                            "pos": pos,
+                            "bats": (p.get("batSide") or {}).get("code"),
+                            "throws": (p.get("pitchHand") or {}).get("code"),
+                            "status": (p.get("status") or {}).get("code"),
+                        },
+                    )
             except Exception as e:
                 logger.warning(f"Could not fetch player {pid}: {e}")
 
-    def load_to_database(self, game_data: Dict, game_id: str):
+    def load_to_database(self, game_data: dict, game_id: str):
         at_bats_df = pd.DataFrame(game_data["at_bats"])
         pitches_df = pd.DataFrame(game_data["pitches"])
 
@@ -310,31 +362,46 @@ class StatcastIngestor:
 
             if existing > 0:
                 logger.info(f"At_bats already exist for {game_id}, upserting")
-                at_bats_df.to_sql(
-                    "at_bats_tmp", conn, if_exists="replace", index=False
-                )
+                at_bats_df.to_sql("at_bats_tmp", conn, if_exists="replace", index=False)
                 cols = [
-                    "ab_id", "game_id", "inning", "half_inning",
-                    "batter_id", "pitcher_id", "outs_before",
-                    "home_score_before", "away_score_before", "bases_code",
-                    "balls", "strikes", "events", "description",
-                    "is_ab", "woba_denom",
-                    "launch_speed", "launch_angle", "estimated_woba_using_speedangle",
-                    "home_score_after", "away_score_after",
+                    "ab_id",
+                    "game_id",
+                    "inning",
+                    "half_inning",
+                    "batter_id",
+                    "pitcher_id",
+                    "outs_before",
+                    "home_score_before",
+                    "away_score_before",
+                    "bases_code",
+                    "balls",
+                    "strikes",
+                    "events",
+                    "description",
+                    "is_ab",
+                    "woba_denom",
+                    "launch_speed",
+                    "launch_angle",
+                    "estimated_woba_using_speedangle",
+                    "home_score_after",
+                    "away_score_after",
                 ]
                 col_list = ", ".join(cols)
-                updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in ("events", "balls", "strikes", "home_score_after", "away_score_after"))
-                conn.execute(text(f"""
+                updates = ", ".join(
+                    f"{c} = EXCLUDED.{c}"
+                    for c in ("events", "balls", "strikes", "home_score_after", "away_score_after")
+                )
+                conn.execute(
+                    text(f"""
                     INSERT INTO at_bats ({col_list})
                     SELECT {col_list} FROM at_bats_tmp
                     ON CONFLICT (ab_id, game_id) DO UPDATE SET
                         {updates}
-                """))
+                """)
+                )
                 conn.execute(text("DROP TABLE at_bats_tmp"))
             else:
-                at_bats_df.to_sql(
-                    "at_bats", conn, if_exists="append", index=False
-                )
+                at_bats_df.to_sql("at_bats", conn, if_exists="append", index=False)
 
             if not pitches_df.empty:
                 existing_p = conn.execute(
@@ -344,14 +411,14 @@ class StatcastIngestor:
 
                 if existing_p == 0:
                     pitches_df.to_sql(
-                        "pitches", conn, if_exists="append", index=False,
+                        "pitches",
+                        conn,
+                        if_exists="append",
+                        index=False,
                         method="multi",
                     )
 
-        logger.info(
-            f"Loaded {len(at_bats_df)} at_bats and {len(pitches_df)} pitches"
-            f" for {game_id}"
-        )
+        logger.info(f"Loaded {len(at_bats_df)} at_bats and {len(pitches_df)} pitches for {game_id}")
 
     def ingest_game(self, game_pk: int, game_id: str):
         raw = self.fetch_game_playbyplay(game_pk)
@@ -366,7 +433,9 @@ class StatcastIngestor:
             for _, game in games_df.iterrows():
                 game_pk = game.get("mlb_game_pk") or game.get("game_id")
                 if game_pk and game["status"] == "FINAL":
-                    gid = f"{game['away_team_id']}{game['home_team_id']}{current.strftime('%y%m%d')}"
+                    gid = (
+                        f"{game['away_team_id']}{game['home_team_id']}{current.strftime('%y%m%d')}"
+                    )
                     try:
                         self.ingest_game(int(game_pk), gid)
                     except Exception as e:
@@ -377,6 +446,7 @@ class StatcastIngestor:
 # ============================================================================
 # UTILIDAD: CARGA DE ARCHIVOS CSV
 # ============================================================================
+
 
 def load_statcast_csv(filepath: str) -> pd.DataFrame:
     logger.info(f"Loading Statcast CSV from {filepath}")
@@ -405,9 +475,10 @@ def csv_to_db(filepath: str, db_url: str, table: str = "at_bats"):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    import sys
+
     from etl.config import DATABASE_URL
 
-    import sys
     if len(sys.argv) > 2 and sys.argv[1] == "--csv":
         csv_to_db(sys.argv[2], DATABASE_URL)
     else:

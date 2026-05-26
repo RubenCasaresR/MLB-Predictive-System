@@ -1,9 +1,10 @@
 """Tests para el detector de Sharp Money."""
 
-import pytest
-import sys
 import os
+import sys
 from datetime import datetime
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -110,17 +111,22 @@ class TestFullGameAnalysis:
 class TestBatchAnalysis:
     def test_batch_dataframe(self, detector):
         import pandas as pd
-        df = pd.DataFrame([{
-            "game_id": "TEST",
-            "home_team_id": "NYY",
-            "away_team_id": "BOS",
-            "sportsbook": "DraftKings",
-            "recorded_at": datetime.now(),
-            "home_ticket_pct": 72.0,
-            "home_money_pct": 42.0,
-            "home_moneyline_open": -130,
-            "home_moneyline_close": -115,
-        }])
+
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "TEST",
+                    "home_team_id": "NYY",
+                    "away_team_id": "BOS",
+                    "sportsbook": "DraftKings",
+                    "recorded_at": datetime.now(),
+                    "home_ticket_pct": 72.0,
+                    "home_money_pct": 42.0,
+                    "home_moneyline_open": -130,
+                    "home_moneyline_close": -115,
+                }
+            ]
+        )
         result = detector.batch_analyze(df)
         assert len(result) >= 1
 

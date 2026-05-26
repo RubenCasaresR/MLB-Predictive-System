@@ -8,11 +8,12 @@
 # =============================================================================
 
 import json
-from typing import Dict, List, Optional
-from datetime import datetime, date
-from dataclasses import dataclass, asdict
-from sqlalchemy import create_engine, text
 import logging
+from dataclasses import asdict, dataclass
+from datetime import date, datetime
+from typing import Dict, List, Optional
+
+from sqlalchemy import create_engine, text
 
 from risk.kelly_criterion import BankrollManager as BaseBankrollManager
 
@@ -73,7 +74,7 @@ class PersistentBankrollManager(BaseBankrollManager):
         stake: float,
         sportsbook: str = "",
         bet_date: date = None,
-    ) -> Dict:
+    ) -> dict:
 
         if bet_date is None:
             bet_date = date.today()
@@ -81,18 +82,20 @@ class PersistentBankrollManager(BaseBankrollManager):
         violations = []
 
         if stake > self.limits.max_per_bet:
-            violations.append(f"Stake ${stake:.2f} exceeds max per bet ${self.limits.max_per_bet:.2f}")
+            violations.append(
+                f"Stake ${stake:.2f} exceeds max per bet ${self.limits.max_per_bet:.2f}"
+            )
 
         if self.current - stake < self.current * (1 - self.limits.max_drawdown):
             violations.append(f"Bet would exceed max drawdown of {self.limits.max_drawdown:.0%}")
 
         daily_total = sum(
-            b["stake"]
-            for b in self.bet_history
-            if b.get("date", date.today()) == bet_date
+            b["stake"] for b in self.bet_history if b.get("date", date.today()) == bet_date
         )
         if daily_total + stake > self.limits.max_per_day:
-            violations.append(f"Daily total ${daily_total + stake:.2f} exceeds ${self.limits.max_per_day:.2f}")
+            violations.append(
+                f"Daily total ${daily_total + stake:.2f} exceeds ${self.limits.max_per_day:.2f}"
+            )
 
         recent_bets = [b for b in self.bet_history if b.get("won") is False]
         recent_losses = sum(b["stake"] for b in recent_bets[-5:])
@@ -107,7 +110,7 @@ class PersistentBankrollManager(BaseBankrollManager):
             "stake_pct": round(stake / self.current * 100, 2) if self.current > 0 else 0,
         }
 
-    def get_bet_slip_summary(self, bets: List[Dict]) -> Dict:
+    def get_bet_slip_summary(self, bets: list[dict]) -> dict:
         total_stake = sum(b.get("recommended_stake", 0) for b in bets)
         total_kelly = sum(b.get("kelly_fraction", 0) for b in bets)
 

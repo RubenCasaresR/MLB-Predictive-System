@@ -11,33 +11,35 @@
 #   - Precipitación: afecta probabilidad de retraso/juego suspendido
 # =============================================================================
 
-import os
 import json
+import logging
+import os
 import time
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
-from datetime import datetime, date, timedelta
+
 import pandas as pd
 import requests
 from sqlalchemy import create_engine, text
-import logging
 
 logger = logging.getLogger(__name__)
 
 from etl.retry import with_retry
 
+
 class WeatherIngestor:
     # Coordenadas de estadios MLB (lat, lon)
     # Coords keyed by stadiums.stadium_id (must match database/seed_data/park_factors_seed.sql)
     STADIUM_COORDS = {
-        1:  {"name": "Yankee Stadium (NYY)", "lat": 40.8296, "lon": -73.9262},
-        2:  {"name": "Fenway Park (BOS)", "lat": 42.3467, "lon": -71.0972},
-        3:  {"name": "Dodger Stadium (LAD)", "lat": 34.0739, "lon": -118.2400},
-        4:  {"name": "Wrigley Field (CHC)", "lat": 41.9484, "lon": -87.6553},
-        5:  {"name": "Minute Maid Park (HOU)", "lat": 29.7572, "lon": -95.3556},
-        6:  {"name": "Oracle Park (SFG)", "lat": 37.7786, "lon": -122.3893},
-        7:  {"name": "Truist Park (ATL)", "lat": 33.8908, "lon": -84.4676},
-        8:  {"name": "Busch Stadium (STL)", "lat": 38.6226, "lon": -90.1928},
-        9:  {"name": "Citizens Bank Park (PHI)", "lat": 39.9056, "lon": -75.1664},
+        1: {"name": "Yankee Stadium (NYY)", "lat": 40.8296, "lon": -73.9262},
+        2: {"name": "Fenway Park (BOS)", "lat": 42.3467, "lon": -71.0972},
+        3: {"name": "Dodger Stadium (LAD)", "lat": 34.0739, "lon": -118.2400},
+        4: {"name": "Wrigley Field (CHC)", "lat": 41.9484, "lon": -87.6553},
+        5: {"name": "Minute Maid Park (HOU)", "lat": 29.7572, "lon": -95.3556},
+        6: {"name": "Oracle Park (SFG)", "lat": 37.7786, "lon": -122.3893},
+        7: {"name": "Truist Park (ATL)", "lat": 33.8908, "lon": -84.4676},
+        8: {"name": "Busch Stadium (STL)", "lat": 38.6226, "lon": -90.1928},
+        9: {"name": "Citizens Bank Park (PHI)", "lat": 39.9056, "lon": -75.1664},
         10: {"name": "Petco Park (SDP)", "lat": 32.7076, "lon": -117.1570},
         11: {"name": "Target Field (MIN)", "lat": 44.9817, "lon": -93.2778},
         12: {"name": "Comerica Park (DET)", "lat": 42.3390, "lon": -83.0485},
@@ -66,15 +68,15 @@ class WeatherIngestor:
         self.db_url = db_url
         self.engine = create_engine(db_url)
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "MLB Predictive System/1.0 (contact@mlbpredictive.com)",
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": "MLB Predictive System/1.0 (contact@mlbpredictive.com)",
+            }
+        )
         logger.info("WeatherIngestor initialized")
 
     @with_retry()
-    def get_forecast_for_stadium(
-        self, lat: float, lon: float
-    ) -> Optional[Dict]:
+    def get_forecast_for_stadium(self, lat: float, lon: float) -> dict | None:
         points_url = f"https://api.weather.gov/points/{lat},{lon}"
         resp = self.session.get(points_url, timeout=15)
         resp.raise_for_status()
@@ -86,22 +88,27 @@ class WeatherIngestor:
 
         return forecast_resp.json()
 
-    def parse_forecast(self, raw: Dict) -> List[Dict]:
+    def parse_forecast(self, raw: dict) -> list[dict]:
         hourly = []
         for period in raw.get("properties", {}).get("periods", []):
-            hourly.append({
-                "forecast_hour": period.get("startTime"),
-                "temperature": period.get("temperature"),
-                "wind_speed": self._parse_wind_speed(period.get("windSpeed", "0 mph")),
-                "wind_direction": period.get("windDirection", "VRB"),
-                "humidity": period.get("relativeHumidity", {}).get("value"),
-                "precipitation_pct": period.get("probabilityOfPrecipitation", {}).get("value", 0),
-                "condition": period.get("shortForecast", ""),
-            })
+            hourly.append(
+                {
+                    "forecast_hour": period.get("startTime"),
+                    "temperature": period.get("temperature"),
+                    "wind_speed": self._parse_wind_speed(period.get("windSpeed", "0 mph")),
+                    "wind_direction": period.get("windDirection", "VRB"),
+                    "humidity": period.get("relativeHumidity", {}).get("value"),
+                    "precipitation_pct": period.get("probabilityOfPrecipitation", {}).get(
+                        "value", 0
+                    ),
+                    "condition": period.get("shortForecast", ""),
+                }
+            )
         return hourly
 
     def _parse_wind_speed(self, speed_str: str) -> float:
         import re
+
         match = re.search(r"(\d+)", speed_str)
         return float(match.group(1)) if match else 0.0
 

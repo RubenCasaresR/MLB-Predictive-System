@@ -1,12 +1,15 @@
 """Tests para api/routers/alerts.py (218 líneas, 6 endpoints + WS + helpers)."""
 
+import os
+import sys
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
+
 import pytest
-import sys, os
-from unittest.mock import patch, MagicMock, AsyncMock, ANY
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi.testclient import TestClient
+
 from api.app import app
 
 
@@ -28,6 +31,7 @@ client = TestClient(app)
 # ConnectionManager
 # ============================================================================
 
+
 class TestConnectionManager:
     def _ws_mock(self):
         ws = MagicMock()
@@ -39,6 +43,7 @@ class TestConnectionManager:
     @pytest.mark.asyncio
     async def test_connect_and_disconnect(self):
         from api.routers.alerts import ConnectionManager
+
         cm = ConnectionManager()
         ws = self._ws_mock()
         await cm.connect(ws)
@@ -49,6 +54,7 @@ class TestConnectionManager:
     @pytest.mark.asyncio
     async def test_broadcast_sends_to_all(self):
         from api.routers.alerts import ConnectionManager
+
         cm = ConnectionManager()
         ws1, ws2 = self._ws_mock(), self._ws_mock()
         await cm.connect(ws1)
@@ -61,6 +67,7 @@ class TestConnectionManager:
     @pytest.mark.asyncio
     async def test_broadcast_removes_failing_connection(self):
         from api.routers.alerts import ConnectionManager
+
         cm = ConnectionManager()
         ws_ok, ws_fail = self._ws_mock(), self._ws_mock()
         ws_fail.send_json.side_effect = Exception("gone")
@@ -75,18 +82,26 @@ class TestConnectionManager:
 # GET /api/v1/alerts/
 # ============================================================================
 
+
 class TestGetAlerts:
     def test_returns_alert_list_response(self):
         mock_cursor = MagicMock()
         mock_cursor.scalar.return_value = 1
         mock_cursor.fetchall.return_value = [
-            [1, "GAME-001", "NYY", "sharp_money", 0.85,
-             "Sharp Money detectado", "2026-05-20T12:00:00", 0],
+            [
+                1,
+                "GAME-001",
+                "NYY",
+                "sharp_money",
+                0.85,
+                "Sharp Money detectado",
+                "2026-05-20T12:00:00",
+                0,
+            ],
         ]
         mock_cursor.fetchone.return_value = None
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/")
 
         assert resp.status_code == 200
@@ -103,8 +118,7 @@ class TestGetAlerts:
         mock_cursor.scalar.return_value = 0
         mock_cursor.fetchall.return_value = []
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/?unread_only=true")
 
         assert resp.status_code == 200
@@ -114,8 +128,7 @@ class TestGetAlerts:
         mock_cursor.scalar.return_value = 0
         mock_cursor.fetchall.return_value = []
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/?limit=5")
 
         assert resp.status_code == 200
@@ -125,8 +138,7 @@ class TestGetAlerts:
         mock_cursor.scalar.return_value = 0
         mock_cursor.fetchall.return_value = []
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/")
 
         assert resp.status_code == 200
@@ -139,16 +151,22 @@ class TestGetAlerts:
 # GET /api/v1/alerts/{alert_id}
 # ============================================================================
 
+
 class TestGetAlert:
     def test_returns_alert_when_found(self):
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = [
-            1, "GAME-001", "NYY", "sharp_money", 0.85,
-            "Test message", "2026-05-20T12:00:00", 1,
+            1,
+            "GAME-001",
+            "NYY",
+            "sharp_money",
+            0.85,
+            "Test message",
+            "2026-05-20T12:00:00",
+            1,
         ]
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/1")
 
         assert resp.status_code == 200
@@ -160,8 +178,7 @@ class TestGetAlert:
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/999")
 
         assert resp.status_code == 404
@@ -172,12 +189,12 @@ class TestGetAlert:
 # POST /api/v1/alerts/{alert_id}/read
 # ============================================================================
 
+
 class TestMarkAlertRead:
     def test_marks_alert_as_read(self):
         mock_cursor = MagicMock()
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.post("/api/v1/alerts/1/read")
 
         assert resp.status_code == 200
@@ -188,12 +205,12 @@ class TestMarkAlertRead:
 # POST /api/v1/alerts/read-all
 # ============================================================================
 
+
 class TestMarkAllRead:
     def test_marks_all_as_read(self):
         mock_cursor = MagicMock()
 
-        with patch("api.database.get_engine",
-                   return_value=_mock_engine(mock_cursor)):
+        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.post("/api/v1/alerts/read-all")
 
         assert resp.status_code == 200
@@ -203,6 +220,7 @@ class TestMarkAllRead:
 # ============================================================================
 # WebSocket /api/v1/alerts/ws
 # ============================================================================
+
 
 class TestWebSocketEndpoint:
     def test_ping_pong(self):
@@ -223,15 +241,18 @@ class TestWebSocketEndpoint:
 # Helper: send_sharp_money_alert
 # ============================================================================
 
+
 class TestSendSharpMoneyAlert:
     @pytest.mark.asyncio
     async def test_broadcasts_correct_message(self):
         from api.routers import alerts as alerts_mod
-        with patch.object(alerts_mod.manager, "broadcast",
-                          new_callable=AsyncMock) as mock_br:
+
+        with patch.object(alerts_mod.manager, "broadcast", new_callable=AsyncMock) as mock_br:
             await alerts_mod.send_sharp_money_alert(
-                game_id="GAME-001", team_id="NYY",
-                signal_type="sharp_money", confidence=0.95,
+                game_id="GAME-001",
+                team_id="NYY",
+                signal_type="sharp_money",
+                confidence=0.95,
                 details={"movement_pct": 12.5},
             )
             mock_br.assert_called_once()
@@ -246,15 +267,19 @@ class TestSendSharpMoneyAlert:
 # Helper: send_ev_alert
 # ============================================================================
 
+
 class TestSendEVAlert:
     @pytest.mark.asyncio
     async def test_broadcasts_correct_message(self):
         from api.routers import alerts as alerts_mod
-        with patch.object(alerts_mod.manager, "broadcast",
-                          new_callable=AsyncMock) as mock_br:
+
+        with patch.object(alerts_mod.manager, "broadcast", new_callable=AsyncMock) as mock_br:
             await alerts_mod.send_ev_alert(
-                game_id="GAME-002", team="LAD",
-                odds=-120, edge=0.08, kelly=0.03,
+                game_id="GAME-002",
+                team="LAD",
+                odds=-120,
+                edge=0.08,
+                kelly=0.03,
             )
             mock_br.assert_called_once()
             msg = mock_br.call_args[0][0]

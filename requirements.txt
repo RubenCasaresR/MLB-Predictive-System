@@ -11,6 +11,7 @@ scipy>=1.13,<2.0
 # Machine Learning
 scikit-learn>=1.5,<2.0
 statsmodels>=0.14,<1.0
+catboost>=1.2,<2.0
 
 # API
 fastapi>=0.104,<1.0
@@ -58,3 +59,6 @@ passlib[bcrypt]>=1.7,<2.0
 
 # Rate Limiting
 slowapi>=0.1.9,<1.0
+
+# Visualization (feature importance charts)
+matplotlib>=3.8,<4.0

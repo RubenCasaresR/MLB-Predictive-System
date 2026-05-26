@@ -1,8 +1,10 @@
 """Tests para WeatherIngestor (parseo con datos mock)."""
 
-import pytest
-import sys, os
+import os
+import sys
 from datetime import date, datetime, timezone
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -65,15 +67,17 @@ class TestParseForecast:
     def test_none_precipitation(self, ingestor):
         forecast = {
             "properties": {
-                "periods": [{
-                    "startTime": "2026-05-20T18:00:00",
-                    "temperature": 72,
-                    "windSpeed": "5 mph",
-                    "windDirection": "N",
-                    "relativeHumidity": {},
-                    "probabilityOfPrecipitation": {"value": None},
-                    "shortForecast": "Clear",
-                }]
+                "periods": [
+                    {
+                        "startTime": "2026-05-20T18:00:00",
+                        "temperature": 72,
+                        "windSpeed": "5 mph",
+                        "windDirection": "N",
+                        "relativeHumidity": {},
+                        "probabilityOfPrecipitation": {"value": None},
+                        "shortForecast": "Clear",
+                    }
+                ]
             }
         }
         hourly = ingestor.parse_forecast(forecast)
@@ -93,18 +97,23 @@ class TestParseForecast:
 class TestIngestGameWeather:
     def test_skips_unknown_stadium(self, ingestor):
         from sqlalchemy import create_engine, text
+
         engine = create_engine("sqlite://")
         ingestor.engine = engine
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS stadiums (stadium_id INTEGER PRIMARY KEY, name TEXT)
-            """))
+            """)
+            )
             conn.execute(text("INSERT INTO stadiums VALUES (999, 'Unknown Park')"))
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS weather_hourly (
                     forecast_hour TEXT, temperature REAL, game_id TEXT
                 )
-            """))
+            """)
+            )
         # No exception expected — stadium 999 not in STADIUM_COORDS
         ingestor.ingest_game_weather("test-game", 999, datetime.now())
         with engine.connect() as conn:
@@ -113,18 +122,22 @@ class TestIngestGameWeather:
 
     def test_ingests_weather_within_window(self, ingestor, monkeypatch):
         from sqlalchemy import create_engine, text
+
         engine = create_engine("sqlite://")
         ingestor.engine = engine
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS weather_hourly (
                     forecast_hour TEXT, temperature REAL, wind_speed REAL,
                     wind_direction TEXT, humidity REAL, precipitation_pct REAL,
                     condition TEXT, game_id TEXT
                 )
-            """))
+            """)
+            )
         monkeypatch.setattr(
-            ingestor, "get_forecast_for_stadium",
+            ingestor,
+            "get_forecast_for_stadium",
             lambda lat, lon: SAMPLE_FORECAST,
         )
         ingestor.ingest_game_weather("test-game", 1, datetime(2026, 5, 20, 19, 0))

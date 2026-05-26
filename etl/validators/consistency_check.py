@@ -10,9 +10,10 @@
 #   - No hay gaps en la secuencia de turnos
 # =============================================================================
 
-from typing import Dict, List, Optional, Tuple
-from sqlalchemy import create_engine, text
 import logging
+from typing import Dict, List, Optional, Tuple
+
+from sqlalchemy import create_engine, text
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class ConsistencyChecker:
         self.db_url = db_url
         self.engine = create_engine(db_url)
 
-    def check_game_score_consistency(self, game_id: str) -> List[str]:
+    def check_game_score_consistency(self, game_id: str) -> list[str]:
         issues = []
         with self.engine.connect() as conn:
             game = conn.execute(
@@ -52,7 +53,7 @@ class ConsistencyChecker:
                     )
         return issues
 
-    def check_batter_sequence(self, game_id: str) -> List[str]:
+    def check_batter_sequence(self, game_id: str) -> list[str]:
         issues = []
         with self.engine.connect() as conn:
             rows = conn.execute(
@@ -83,7 +84,7 @@ class ConsistencyChecker:
             groups[key].append(row)
         return groups.values()
 
-    def check_lineup_coherence(self, game_id: str) -> List[str]:
+    def check_lineup_coherence(self, game_id: str) -> list[str]:
         issues = []
         with self.engine.connect() as conn:
             lineups = conn.execute(
@@ -111,7 +112,7 @@ class ConsistencyChecker:
 
         return issues
 
-    def check_all(self, game_id: str) -> Dict:
+    def check_all(self, game_id: str) -> dict:
         issues = {}
         issues["score"] = self.check_game_score_consistency(game_id)
         issues["batter_sequence"] = self.check_batter_sequence(game_id)
@@ -133,6 +134,7 @@ class ConsistencyChecker:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     from etl.config import DATABASE_URL
+
     checker = ConsistencyChecker(DATABASE_URL)
     result = checker.check_all("2025-06-15-NYY-BOS")
     status = "PASS" if result["passed"] else f"{result['issues_count']} issues"

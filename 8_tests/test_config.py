@@ -1,8 +1,10 @@
 """Tests para etl/config.py (constantes y variables de entorno)."""
 
-import pytest
-import sys, os
 import importlib
+import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -14,12 +16,14 @@ def _reload_config():
     if "etl.config" in sys.modules:
         del sys.modules["etl.config"]
     import etl.config as c
+
     return c
 
 
 # ============================================================================
 # BASE DE DATOS
 # ============================================================================
+
 
 class TestDBConfig:
     def test_default_host(self):
@@ -88,6 +92,7 @@ class TestDBConfig:
 # APIS DE DATOS
 # ============================================================================
 
+
 class TestAPIConfig:
     def test_statcast_base_url(self):
         assert cfg.STATCAST_BASE_URL == "https://statsapi.mlb.com/api/v1"
@@ -118,6 +123,7 @@ class TestAPIConfig:
 # ============================================================================
 # SPORTSBOOKS CONFIG
 # ============================================================================
+
 
 class TestSportsbooksConfig:
     def test_active_sportsbooks_count(self):
@@ -152,6 +158,7 @@ class TestSportsbooksConfig:
 # PARÁMETROS DEL MOTOR PREDICTIVO
 # ============================================================================
 
+
 class TestPredictiveEngineParams:
     def test_monte_carlo_iterations(self):
         assert cfg.MONTE_CARLO_DEFAULT_ITERATIONS == 10000
@@ -183,6 +190,7 @@ class TestPredictiveEngineParams:
 # ============================================================================
 # RUTAS DE ARCHIVOS
 # ============================================================================
+
 
 class TestPaths:
     def test_data_dir_default(self):
@@ -226,6 +234,7 @@ class TestPaths:
 # LOGGING
 # ============================================================================
 
+
 class TestLoggingConfig:
     def test_logging_config_structure(self):
         assert cfg.LOGGING_CONFIG["version"] == 1
@@ -261,6 +270,7 @@ class TestLoggingConfig:
 # ============================================================================
 # FEATURE ENGINEERING PARAMS
 # ============================================================================
+
 
 class TestFeatureParams:
     def test_rolling_windows(self):

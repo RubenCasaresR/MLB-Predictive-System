@@ -55,6 +55,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.etl
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://mlb_user:${MLB_DB_PASSWORD:-changeme_in_prod}@postgres:5432/mlb_predictive
       ODDS_API_KEY: ${ODDS_API_KEY:-}
@@ -65,7 +66,12 @@ services:
     volumes:
       - ./:/app
       - etl_data:/data
-    command: python -m etl.orchestrator --loop
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/tmp/etl_healthy') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # ==========================================================================
   # Redis (Cache / Message Queue / Alert PubSub)

@@ -1,0 +1,14 @@
+# =============================================================================
+# MLB Predictive System — Dev / CI dependencies
+# =============================================================================
+
+# Linting & formatting
+ruff>=0.5,<1.0
+
+# Testing
+pytest>=7.4,<8.0
+pytest-asyncio>=0.21,<1.0
+pytest-cov>=4.1,<5.0
+
+# Coverage
+coverage>=7.5,<8.0

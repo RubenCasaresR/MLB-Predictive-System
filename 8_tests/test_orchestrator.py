@@ -1,17 +1,19 @@
 """Tests para ETLOrchestrator con mocks."""
 
-import pytest
-import sys, os
+import os
+import sys
 from datetime import date
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from etl.orchestrator import ETLOrchestrator
 
-
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def orch():
@@ -21,6 +23,7 @@ def orch():
 # ============================================================================
 # Tests: run_daily_pipeline error handling
 # ============================================================================
+
 
 class TestPipelineErrorHandling:
     def test_continues_when_step_fails(self, orch, monkeypatch):
@@ -97,6 +100,7 @@ class TestPipelineErrorHandling:
         def ok(step_name):
             def fn(_):
                 call_log.append(step_name)
+
             return fn
 
         monkeypatch.setattr(orch, "_load_schedule", ok("load_schedule"))
@@ -114,6 +118,7 @@ class TestPipelineErrorHandling:
 # Tests: _load_schedule no data
 # ============================================================================
 
+
 class TestLoadSchedule:
     def test_empty_schedule_does_not_crash(self, orch, monkeypatch):
         import pandas as pd
@@ -122,6 +127,7 @@ class TestLoadSchedule:
             return pd.DataFrame()
 
         import etl.ingestors.statcast_ingestor as si
+
         monkeypatch.setattr(si.StatcastIngestor, "fetch_daily_games", mock_fetch)
         # Should not raise
         orch._load_schedule(date(2026, 5, 20))

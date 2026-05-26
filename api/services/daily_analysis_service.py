@@ -1,20 +1,28 @@
-import os
-import math
 import logging
+import math
+import os
 import traceback
-from datetime import datetime, date as date_mod, timezone
-from typing import List, Optional, Tuple, Dict, Any
+from datetime import date as date_mod
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import requests as http_requests
 from sqlalchemy import text
-from zoneinfo import ZoneInfo
 
 from api.database import get_engine
 from api.models.pydantic_models import (
-    DailyAnalysisResponse, GameAnalysis,
-    PitchingAnalysis, OffensiveAnalysis, BullpenAnalysis,
-    WeatherImpact, ParkFactor, FatigueAnalysis, MarketSignals,
-    RecommendedBet, PropAnalysisItem,
+    BullpenAnalysis,
+    DailyAnalysisResponse,
+    FatigueAnalysis,
+    GameAnalysis,
+    MarketSignals,
+    OffensiveAnalysis,
+    ParkFactor,
+    PitchingAnalysis,
+    PropAnalysisItem,
+    RecommendedBet,
+    WeatherImpact,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,22 +30,37 @@ logger = logging.getLogger(__name__)
 MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule"
 
 _SHORT_NAME_MAP = {
-    "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL",
-    "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS",
-    "Chicago Cubs": "CHC", "Chicago White Sox": "CHW",
-    "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE",
-    "Colorado Rockies": "COL", "Detroit Tigers": "DET",
-    "Houston Astros": "HOU", "Kansas City Royals": "KC",
-    "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD",
-    "Miami Marlins": "MIA", "Milwaukee Brewers": "MIL",
-    "Minnesota Twins": "MIN", "New York Yankees": "NYY",
-    "New York Mets": "NYM", "Oakland Athletics": "OAK",
+    "Arizona Diamondbacks": "ARI",
+    "Atlanta Braves": "ATL",
+    "Baltimore Orioles": "BAL",
+    "Boston Red Sox": "BOS",
+    "Chicago Cubs": "CHC",
+    "Chicago White Sox": "CHW",
+    "Cincinnati Reds": "CIN",
+    "Cleveland Guardians": "CLE",
+    "Colorado Rockies": "COL",
+    "Detroit Tigers": "DET",
+    "Houston Astros": "HOU",
+    "Kansas City Royals": "KC",
+    "Los Angeles Angels": "LAA",
+    "Los Angeles Dodgers": "LAD",
+    "Miami Marlins": "MIA",
+    "Milwaukee Brewers": "MIL",
+    "Minnesota Twins": "MIN",
+    "New York Yankees": "NYY",
+    "New York Mets": "NYM",
+    "Oakland Athletics": "OAK",
     "Athletics": "OAK",
-    "Philadelphia Phillies": "PHI", "Pittsburgh Pirates": "PIT",
-    "San Diego Padres": "SD", "San Francisco Giants": "SF",
-    "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL",
-    "Tampa Bay Rays": "TB", "Texas Rangers": "TEX",
-    "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
+    "Philadelphia Phillies": "PHI",
+    "Pittsburgh Pirates": "PIT",
+    "San Diego Padres": "SD",
+    "San Francisco Giants": "SF",
+    "Seattle Mariners": "SEA",
+    "St. Louis Cardinals": "STL",
+    "Tampa Bay Rays": "TB",
+    "Texas Rangers": "TEX",
+    "Toronto Blue Jays": "TOR",
+    "Washington Nationals": "WSH",
 }
 
 
@@ -49,22 +72,38 @@ def _make_game_id(away_name: str, home_name: str, date_str: str) -> str:
     yymmdd = date_str.replace("-", "")[2:]
     return f"{_short_team_name(away_name)}{_short_team_name(home_name)}{yymmdd}"
 
+
 TEAM_NAMES = {
-    "ARI": "Arizona Diamondbacks", "ATL": "Atlanta Braves",
-    "BAL": "Baltimore Orioles", "BOS": "Boston Red Sox",
-    "CHC": "Chicago Cubs", "CHW": "Chicago White Sox",
-    "CIN": "Cincinnati Reds", "CLE": "Cleveland Guardians",
-    "COL": "Colorado Rockies", "DET": "Detroit Tigers",
-    "HOU": "Houston Astros", "KC": "Kansas City Royals",
-    "LAA": "Los Angeles Angels", "LAD": "Los Angeles Dodgers",
-    "MIA": "Miami Marlins", "MIL": "Milwaukee Brewers",
-    "MIN": "Minnesota Twins", "NYM": "New York Mets",
-    "NYY": "New York Yankees", "OAK": "Oakland Athletics",
-    "PHI": "Philadelphia Phillies", "PIT": "Pittsburgh Pirates",
-    "SD": "San Diego Padres", "SEA": "Seattle Mariners",
-    "SF": "San Francisco Giants", "STL": "St. Louis Cardinals",
-    "TB": "Tampa Bay Rays", "TEX": "Texas Rangers",
-    "TOR": "Toronto Blue Jays", "WSH": "Washington Nationals",
+    "ARI": "Arizona Diamondbacks",
+    "ATL": "Atlanta Braves",
+    "BAL": "Baltimore Orioles",
+    "BOS": "Boston Red Sox",
+    "CHC": "Chicago Cubs",
+    "CHW": "Chicago White Sox",
+    "CIN": "Cincinnati Reds",
+    "CLE": "Cleveland Guardians",
+    "COL": "Colorado Rockies",
+    "DET": "Detroit Tigers",
+    "HOU": "Houston Astros",
+    "KC": "Kansas City Royals",
+    "LAA": "Los Angeles Angels",
+    "LAD": "Los Angeles Dodgers",
+    "MIA": "Miami Marlins",
+    "MIL": "Milwaukee Brewers",
+    "MIN": "Minnesota Twins",
+    "NYM": "New York Mets",
+    "NYY": "New York Yankees",
+    "OAK": "Oakland Athletics",
+    "PHI": "Philadelphia Phillies",
+    "PIT": "Pittsburgh Pirates",
+    "SD": "San Diego Padres",
+    "SEA": "Seattle Mariners",
+    "SF": "San Francisco Giants",
+    "STL": "St. Louis Cardinals",
+    "TB": "Tampa Bay Rays",
+    "TEX": "Texas Rangers",
+    "TOR": "Toronto Blue Jays",
+    "WSH": "Washington Nationals",
 }
 
 
@@ -72,12 +111,13 @@ def _team_name(code: str) -> str:
     return TEAM_NAMES.get(code, code)
 
 
-def _vig_free_prob(over_odds: int, under_odds: int) -> Tuple[float, float]:
+def _vig_free_prob(over_odds: int, under_odds: int) -> tuple[float, float]:
     def to_prob(odds):
         if odds > 0:
             return 100 / (odds + 100)
         else:
             return -odds / (-odds + 100)
+
     p_over = to_prob(over_odds)
     p_under = to_prob(under_odds)
     total = p_over + p_under
@@ -108,26 +148,29 @@ def _kelly(prob: float, odds: int, fraction: float = 0.25) -> float:
 
 
 class DailyAnalysisService:
-
     def __init__(self):
         self.engine = get_engine()
         self.tz_name = os.getenv("TIMEZONE", "America/Mexico_City")
         self.target_tz = ZoneInfo(self.tz_name)
 
-    def get_analysis(self, target_date: Optional[str] = None) -> DailyAnalysisResponse:
+    def get_analysis(self, target_date: str | None = None) -> DailyAnalysisResponse:
         if target_date:
             game_date = target_date
         else:
             game_date = datetime.now(self.target_tz).strftime("%Y-%m-%d")
 
-        logger.info("get_analysis: target_date=%s resolved_date=%s tz=%s",
-                     target_date, game_date, self.tz_name)
+        logger.info(
+            "get_analysis: target_date=%s resolved_date=%s tz=%s",
+            target_date,
+            game_date,
+            self.tz_name,
+        )
 
         games = self._get_games(game_date)
         if not games:
             logger.info("No games in DB for %s, trying live MLB API", game_date)
             games = self._fetch_live_games(game_date)
-        analyses: List[GameAnalysis] = []
+        analyses: list[GameAnalysis] = []
 
         for game in games:
             try:
@@ -136,10 +179,12 @@ class DailyAnalysisService:
             except Exception as e:
                 logger.warning(f"Error analyzing game {game.get('game_id')}: {e}")
 
-        analyses.sort(key=lambda g: (
-            g.start_time or "",
-            -(g.recommended_bet.edge_pct if g.recommended_bet else 0),
-        ))
+        analyses.sort(
+            key=lambda g: (
+                g.start_time or "",
+                -(g.recommended_bet.edge_pct if g.recommended_bet else 0),
+            )
+        )
 
         return DailyAnalysisResponse(
             game_date=game_date,
@@ -148,9 +193,10 @@ class DailyAnalysisService:
             games=analyses,
         )
 
-    def _get_games(self, game_date: str) -> List[dict]:
+    def _get_games(self, game_date: str) -> list[dict]:
         with self.engine.connect() as conn:
-            rows = conn.execute(text("""
+            rows = conn.execute(
+                text("""
                 SELECT g.game_id, g.game_date, g.home_team_id, g.away_team_id,
                        g.home_probable_pitcher, g.away_probable_pitcher,
                        g.status, g.start_time_et,
@@ -163,14 +209,20 @@ class DailyAnalysisService:
                 WHERE g.game_date = :gd
                   AND (g.status IS NULL OR g.status NOT IN ('FINAL','Final','Postponed','Cancelled'))
                 ORDER BY g.start_time_et
-            """), {"gd": game_date}).fetchall()
+            """),
+                {"gd": game_date},
+            ).fetchall()
 
         return [
             {
-                "game_id": r[0], "game_date": str(r[1]) if r[1] else "",
-                "home_team_id": r[2] or "", "away_team_id": r[3] or "",
-                "home_pitcher_id": r[4], "away_pitcher_id": r[5],
-                "status": r[6] or "", "start_time": str(r[7]) if r[7] else "",
+                "game_id": r[0],
+                "game_date": str(r[1]) if r[1] else "",
+                "home_team_id": r[2] or "",
+                "away_team_id": r[3] or "",
+                "home_pitcher_id": r[4],
+                "away_pitcher_id": r[5],
+                "status": r[6] or "",
+                "start_time": str(r[7]) if r[7] else "",
                 "home_rest_days": r[8] if r[8] else 0,
                 "away_rest_days": r[9] if r[9] else 0,
                 "home_travel_miles": r[10] if r[10] else 0,
@@ -184,7 +236,7 @@ class DailyAnalysisService:
             for r in rows
         ]
 
-    def _fetch_live_games(self, game_date: str) -> List[dict]:
+    def _fetch_live_games(self, game_date: str) -> list[dict]:
         try:
             resp = http_requests.get(
                 MLB_SCHEDULE_URL,
@@ -207,7 +259,7 @@ class DailyAnalysisService:
         logger.info(f"Fetched {len(games)} games from live MLB API for {game_date}")
         return games
 
-    def _parse_live_game(self, game: dict, game_date: str) -> Optional[dict]:
+    def _parse_live_game(self, game: dict, game_date: str) -> dict | None:
         teams = game.get("teams", {})
         away = teams.get("away", {}).get("team", {})
         home = teams.get("home", {}).get("team", {})
@@ -250,7 +302,9 @@ class DailyAnalysisService:
 
         sim = self._get_simulation(gid)
         market = self._get_market(gid)
-        pitchers = self._get_pitcher_data(gid, home, away, game.get("home_pitcher_id"), game.get("away_pitcher_id"))
+        pitchers = self._get_pitcher_data(
+            gid, home, away, game.get("home_pitcher_id"), game.get("away_pitcher_id")
+        )
         teams_data = self._get_team_data(home, away)
         weather_data = self._get_weather(gid)
         park_data = self._get_park_factors(gid, game.get("venue_id"))
@@ -277,16 +331,55 @@ class DailyAnalysisService:
         fat_away = self._build_fatigue(game, "away")
         signals = self._build_market_signals(market, home, away)
 
-        rec_bet = self._determine_recommended_bet(game, sim, market, pitchers, teams_data, weather_data,
-                                                    home_win_prob, away_win_prob, home, away)
-        props = self._evaluate_props(game, pitchers, home_batters, away_batters, home, away, weather_data, park_data)
+        rec_bet = self._determine_recommended_bet(
+            game,
+            sim,
+            market,
+            pitchers,
+            teams_data,
+            weather_data,
+            home_win_prob,
+            away_win_prob,
+            home,
+            away,
+        )
+        props = self._evaluate_props(
+            game, pitchers, home_batters, away_batters, home, away, weather_data, park_data
+        )
 
-        narrative = self._generate_narrative(game, home, away, home_win_prob, away_win_prob,
-                                              mean_home_runs, mean_away_runs, pitch_home, pitch_away,
-                                              off_home, off_away, bull_home, bull_away, weather, park,
-                                              fat_home, fat_away, signals, rec_bet)
-        key_factors = self._generate_key_factors(home, away, home_win_prob, away_win_prob, sim, market,
-                                                  pitchers, teams_data, weather_data, signals)
+        narrative = self._generate_narrative(
+            game,
+            home,
+            away,
+            home_win_prob,
+            away_win_prob,
+            mean_home_runs,
+            mean_away_runs,
+            pitch_home,
+            pitch_away,
+            off_home,
+            off_away,
+            bull_home,
+            bull_away,
+            weather,
+            park,
+            fat_home,
+            fat_away,
+            signals,
+            rec_bet,
+        )
+        key_factors = self._generate_key_factors(
+            home,
+            away,
+            home_win_prob,
+            away_win_prob,
+            sim,
+            market,
+            pitchers,
+            teams_data,
+            weather_data,
+            signals,
+        )
 
         return GameAnalysis(
             game_id=gid,
@@ -324,16 +417,19 @@ class DailyAnalysisService:
             key_factors=key_factors,
         )
 
-    def _get_simulation(self, game_id: str) -> Optional[dict]:
+    def _get_simulation(self, game_id: str) -> dict | None:
         with self.engine.connect() as conn:
-            row = conn.execute(text("""
+            row = conn.execute(
+                text("""
                 SELECT home_win_prob, away_win_prob,
                        mean_home_runs, mean_away_runs,
                        std_home_runs, std_away_runs,
                        extra_innings_prob, walkoff_prob, n_iterations
                 FROM simulation_results
                 WHERE game_id = :gid
-            """), {"gid": game_id}).fetchone()
+            """),
+                {"gid": game_id},
+            ).fetchone()
         if not row:
             return None
         return {
@@ -348,9 +444,10 @@ class DailyAnalysisService:
             "n_iterations": row[8] or 10000,
         }
 
-    def _get_market(self, game_id: str) -> Optional[dict]:
+    def _get_market(self, game_id: str) -> dict | None:
         with self.engine.connect() as conn:
-            row = conn.execute(text("""
+            row = conn.execute(
+                text("""
                 SELECT home_moneyline_close, away_moneyline_close,
                        total_close, total_over_odds_close, total_under_odds_close,
                        sharp_money_flag, rlm_flag,
@@ -360,7 +457,9 @@ class DailyAnalysisService:
                 WHERE game_id = :gid
                 ORDER BY recorded_at DESC
                 LIMIT 1
-            """), {"gid": game_id}).fetchone()
+            """),
+                {"gid": game_id},
+            ).fetchone()
         if not row:
             return None
         return {
@@ -377,11 +476,14 @@ class DailyAnalysisService:
             "away_money_pct": float(row[10]) if row[10] else None,
         }
 
-    def _get_pitcher_data(self, game_id: str, home_team: str, away_team: str,
-                          home_pitcher_id, away_pitcher_id) -> dict:
+    def _get_pitcher_data(
+        self, game_id: str, home_team: str, away_team: str, home_pitcher_id, away_pitcher_id
+    ) -> dict:
         result = {"home": {"player_id": home_pitcher_id}, "away": {"player_id": away_pitcher_id}}
-        for side, pid, team in [("home", home_pitcher_id, home_team),
-                                 ("away", away_pitcher_id, away_team)]:
+        for side, pid, team in [
+            ("home", home_pitcher_id, home_team),
+            ("away", away_pitcher_id, away_team),
+        ]:
             if not pid:
                 continue
             try:
@@ -389,7 +491,8 @@ class DailyAnalysisService:
             except (ValueError, TypeError):
                 continue
             with self.engine.connect() as conn:
-                row = conn.execute(text("""
+                row = conn.execute(
+                    text("""
                     SELECT prs.fatigue_score, prs.fip_30d, prs.avg_velo_30d,
                            prs.k_per_9_30d, prs.whiff_pct_30d, prs.avg_spin_30d,
                            p.full_name, p.throws,
@@ -399,7 +502,9 @@ class DailyAnalysisService:
                     WHERE prs.player_id = :pid
                     ORDER BY prs.as_of_date DESC
                     LIMIT 1
-                """), {"pid": pid_int}).fetchone()
+                """),
+                    {"pid": pid_int},
+                ).fetchone()
             if row:
                 result[side] = {
                     "player_id": pid_int,
@@ -420,7 +525,8 @@ class DailyAnalysisService:
         result = {"home": {}, "away": {}}
         for side, team in [("home", home_team), ("away", away_team)]:
             with self.engine.connect() as conn:
-                row = conn.execute(text("""
+                row = conn.execute(
+                    text("""
                     SELECT bullpen_era_30d, bullpen_fip_30d, record_last_10,
                            run_diff_30d, woba_30d, woba_vs_rhp_30d,
                            woba_vs_lhp_30d, k_pct_30d, bb_pct_30d,
@@ -429,7 +535,9 @@ class DailyAnalysisService:
                     WHERE team_id = :tid
                     ORDER BY as_of_date DESC
                     LIMIT 1
-                """), {"tid": team}).fetchone()
+                """),
+                    {"tid": team},
+                ).fetchone()
             if row:
                 result[side] = {
                     "bullpen_era_30d": float(row[0]) if row[0] else None,
@@ -446,16 +554,19 @@ class DailyAnalysisService:
                 }
         return result
 
-    def _get_weather(self, game_id: str) -> Optional[dict]:
+    def _get_weather(self, game_id: str) -> dict | None:
         with self.engine.connect() as conn:
-            row = conn.execute(text("""
+            row = conn.execute(
+                text("""
                 SELECT temperature, wind_speed, wind_direction,
                        precipitation_pct, condition
                 FROM weather_hourly
                 WHERE game_id = :gid
                 ORDER BY forecast_hour
                 LIMIT 1
-            """), {"gid": game_id}).fetchone()
+            """),
+                {"gid": game_id},
+            ).fetchone()
         if not row:
             return None
         return {
@@ -466,7 +577,7 @@ class DailyAnalysisService:
             "condition": row[4] or "",
         }
 
-    def _get_park_factors(self, game_id: str, venue_id) -> Optional[dict]:
+    def _get_park_factors(self, game_id: str, venue_id) -> dict | None:
         if not venue_id:
             return None
         try:
@@ -474,7 +585,8 @@ class DailyAnalysisService:
         except (ValueError, TypeError):
             return None
         with self.engine.connect() as conn:
-            row = conn.execute(text("""
+            row = conn.execute(
+                text("""
                 SELECT pfm.pf_hr, pfm.pf_woba, pfm.pf_k,
                        s.name
                 FROM park_factors_monthly pfm
@@ -482,13 +594,18 @@ class DailyAnalysisService:
                 WHERE pfm.stadium_id = :vid
                 ORDER BY pfm.month DESC
                 LIMIT 1
-            """), {"vid": vid}).fetchone()
+            """),
+                {"vid": vid},
+            ).fetchone()
             if not row:
-                row2 = conn.execute(text("""
+                row2 = conn.execute(
+                    text("""
                     SELECT 1.0, 1.0, 1.0, s.name
                     FROM stadiums s
                     WHERE s.stadium_id = :vid
-                """), {"vid": vid}).fetchone()
+                """),
+                    {"vid": vid},
+                ).fetchone()
                 if row2:
                     return {
                         "hr_factor": float(row2[0]),
@@ -504,9 +621,10 @@ class DailyAnalysisService:
             "stadium_name": row[3] or "",
         }
 
-    def _get_batter_data(self, game_id: str, team_id: str) -> List[dict]:
+    def _get_batter_data(self, game_id: str, team_id: str) -> list[dict]:
         with self.engine.connect() as conn:
-            rows = conn.execute(text("""
+            rows = conn.execute(
+                text("""
                 SELECT p.full_name, brs.woba_30d, brs.k_pct_30d, brs.bb_pct_30d,
                        brs.hr_per_9_30d,
                        brs.groundball_pct_30d, brs.flyball_pct_30d,
@@ -516,7 +634,9 @@ class DailyAnalysisService:
                 WHERE p.team_id = :tid
                 ORDER BY brs.woba_30d DESC NULLS LAST
                 LIMIT 9
-            """), {"tid": team_id}).fetchall()
+            """),
+                {"tid": team_id},
+            ).fetchall()
         return [
             {
                 "player_id": r[7],
@@ -551,7 +671,15 @@ class DailyAnalysisService:
         parts = []
         fip = data.get("fip_30d")
         if fip:
-            fip_label = "excelente" if fip < 3.2 else "bueno" if fip < 3.8 else "regular" if fip < 4.5 else "elevado"
+            fip_label = (
+                "excelente"
+                if fip < 3.2
+                else "bueno"
+                if fip < 3.8
+                else "regular"
+                if fip < 4.5
+                else "elevado"
+            )
             parts.append(f"FIP {fip:.2f} ({fip_label})")
 
         k9 = data.get("k_per_9_30d")
@@ -593,7 +721,9 @@ class DailyAnalysisService:
             summary=summary,
         )
 
-    def _build_offensive_analysis(self, data: dict, batters: List[dict], team_id: str) -> OffensiveAnalysis:
+    def _build_offensive_analysis(
+        self, data: dict, batters: list[dict], team_id: str
+    ) -> OffensiveAnalysis:
         woba = data.get("team_woba_30d")
         woba_vs_rhp = data.get("team_woba_vs_rhp_30d")
         woba_vs_lhp = data.get("team_woba_vs_lhp_30d")
@@ -606,7 +736,15 @@ class DailyAnalysisService:
 
         parts = []
         if woba:
-            woba_label = "excelente" if woba > 0.340 else "bueno" if woba > 0.320 else "promedio" if woba > 0.300 else "bajo"
+            woba_label = (
+                "excelente"
+                if woba > 0.340
+                else "bueno"
+                if woba > 0.320
+                else "promedio"
+                if woba > 0.300
+                else "bajo"
+            )
             parts.append(f"wOBA {woba:.3f} ({woba_label})")
         if barrel:
             parts.append(f"Barrel% {barrel:.1f}%")
@@ -637,7 +775,15 @@ class DailyAnalysisService:
         fip = data.get("bullpen_fip_30d")
         parts = []
         if era:
-            era_label = "excelente" if era < 3.5 else "bueno" if era < 4.0 else "regular" if era < 4.5 else "débil"
+            era_label = (
+                "excelente"
+                if era < 3.5
+                else "bueno"
+                if era < 4.0
+                else "regular"
+                if era < 4.5
+                else "débil"
+            )
             parts.append(f"ERA {era:.2f} ({era_label})")
         if fip:
             parts.append(f"FIP {fip:.2f}")
@@ -648,7 +794,7 @@ class DailyAnalysisService:
             summary=summary,
         )
 
-    def _build_weather(self, data: Optional[dict]) -> WeatherImpact:
+    def _build_weather(self, data: dict | None) -> WeatherImpact:
         if not data:
             return WeatherImpact(summary="Sin datos climáticos")
         temp = data.get("temperature")
@@ -697,7 +843,7 @@ class DailyAnalysisService:
             summary=summary,
         )
 
-    def _build_park(self, data: Optional[dict]) -> ParkFactor:
+    def _build_park(self, data: dict | None) -> ParkFactor:
         if not data:
             return ParkFactor(summary="Sin datos del estadio")
         name = data.get("stadium_name", "")
@@ -710,7 +856,7 @@ class DailyAnalysisService:
         parts.append(f"HR {hr:.2f} ({hr_label})")
         parts.append(f"wOBA {woba:.2f}")
         parts.append(f"K {k:.2f}")
-        summary = f"{name}: {' · '.join(parts)}" if name else ' · '.join(parts)
+        summary = f"{name}: {' · '.join(parts)}" if name else " · ".join(parts)
         return ParkFactor(
             hr_factor=hr,
             woba_factor=woba,
@@ -729,7 +875,7 @@ class DailyAnalysisService:
             summary="",
         )
 
-    def _build_market_signals(self, data: Optional[dict], home: str, away: str) -> MarketSignals:
+    def _build_market_signals(self, data: dict | None, home: str, away: str) -> MarketSignals:
         if not data:
             return MarketSignals()
         parts = []
@@ -756,10 +902,19 @@ class DailyAnalysisService:
             summary=summary,
         )
 
-    def _determine_recommended_bet(self, game: dict, sim: Optional[dict], market: Optional[dict],
-                                    pitchers: dict, teams_data: dict, weather_data: Optional[dict],
-                                    home_win_prob: float, away_win_prob: float,
-                                    home: str, away: str) -> Optional[RecommendedBet]:
+    def _determine_recommended_bet(
+        self,
+        game: dict,
+        sim: dict | None,
+        market: dict | None,
+        pitchers: dict,
+        teams_data: dict,
+        weather_data: dict | None,
+        home_win_prob: float,
+        away_win_prob: float,
+        home: str,
+        away: str,
+    ) -> RecommendedBet | None:
         if not market or not sim:
             return None
 
@@ -781,18 +936,27 @@ class DailyAnalysisService:
                 continue
 
             score = 0
-            if edge_pct >= 10: score += 30
-            elif edge_pct >= 7: score += 25
-            elif edge_pct >= 5: score += 20
-            elif edge_pct >= 3: score += 10
+            if edge_pct >= 10:
+                score += 30
+            elif edge_pct >= 7:
+                score += 25
+            elif edge_pct >= 5:
+                score += 20
+            elif edge_pct >= 3:
+                score += 10
 
             gap = abs(home_win_prob - away_win_prob) * 100
-            if gap >= 30: score += 15
-            elif gap >= 20: score += 10
-            elif gap >= 10: score += 5
+            if gap >= 30:
+                score += 15
+            elif gap >= 20:
+                score += 10
+            elif gap >= 10:
+                score += 5
 
-            if market.get("sharp_money_flag"): score += 10
-            if market.get("rlm_flag"): score += 5
+            if market.get("sharp_money_flag"):
+                score += 10
+            if market.get("rlm_flag"):
+                score += 5
 
             pit_rec = pitchers.get(side, {})
             pit_opp = pitchers.get(opp_side, {})
@@ -800,9 +964,12 @@ class DailyAnalysisService:
             fat_opp = pit_opp.get("fatigue_score")
             if fat_rec is not None and fat_opp is not None:
                 diff = fat_opp - fat_rec
-                if diff >= 0.20: score += 15
-                elif diff >= 0.10: score += 10
-                elif diff >= 0.05: score += 5
+                if diff >= 0.20:
+                    score += 15
+                elif diff >= 0.10:
+                    score += 10
+                elif diff >= 0.05:
+                    score += 5
 
             td_rec = teams_data.get(side, {})
             td_opp = teams_data.get(opp_side, {})
@@ -810,17 +977,23 @@ class DailyAnalysisService:
             bull_opp = td_opp.get("bullpen_era_30d")
             if bull_rec is not None and bull_opp is not None:
                 bdiff = bull_opp - bull_rec
-                if bdiff >= 1.5: score += 10
-                elif bdiff >= 0.8: score += 6
-                elif bdiff >= 0.3: score += 3
+                if bdiff >= 1.5:
+                    score += 10
+                elif bdiff >= 0.8:
+                    score += 6
+                elif bdiff >= 0.3:
+                    score += 3
 
             if weather_data:
                 precip = weather_data.get("precipitation_pct")
-                if precip is not None and precip < 20: score += 2
+                if precip is not None and precip < 20:
+                    score += 2
                 wind = weather_data.get("wind_speed")
-                if wind is not None and wind < 15: score += 2
+                if wind is not None and wind < 15:
+                    score += 2
                 temp = weather_data.get("temperature")
-                if temp is not None and 60 <= temp <= 85: score += 1
+                if temp is not None and 60 <= temp <= 85:
+                    score += 1
 
             kelly = _kelly(wp, odds)
             stake = kelly * 10000
@@ -837,18 +1010,20 @@ class DailyAnalysisService:
 
             conf = "Alta" if score >= 40 else "Media" if score >= 25 else "Baja"
 
-            candidates.append({
-                "team": team,
-                "opponent": opp,
-                "market_type": "moneyline",
-                "odds": odds,
-                "edge_pct": round(edge_pct, 1),
-                "confidence": conf,
-                "kelly_fraction": round(kelly, 4),
-                "recommended_stake": round(stake, 2),
-                "reasoning": reasons[:6],
-                "score": score,
-            })
+            candidates.append(
+                {
+                    "team": team,
+                    "opponent": opp,
+                    "market_type": "moneyline",
+                    "odds": odds,
+                    "edge_pct": round(edge_pct, 1),
+                    "confidence": conf,
+                    "kelly_fraction": round(kelly, 4),
+                    "recommended_stake": round(stake, 2),
+                    "reasoning": reasons[:6],
+                    "score": score,
+                }
+            )
 
         if not candidates:
             return None
@@ -867,15 +1042,22 @@ class DailyAnalysisService:
             reasoning=best["reasoning"],
         )
 
-    def _evaluate_props(self, game: dict, pitchers: dict,
-                        home_batters: List[dict], away_batters: List[dict],
-                        home: str, away: str,
-                        weather_data: Optional[dict],
-                        park_data: Optional[dict]) -> List[PropAnalysisItem]:
-        results: List[PropAnalysisItem] = []
+    def _evaluate_props(
+        self,
+        game: dict,
+        pitchers: dict,
+        home_batters: list[dict],
+        away_batters: list[dict],
+        home: str,
+        away: str,
+        weather_data: dict | None,
+        park_data: dict | None,
+    ) -> list[PropAnalysisItem]:
+        results: list[PropAnalysisItem] = []
 
         try:
             from prediction.poisson_props import PoissonPropsEngine
+
             engine = PoissonPropsEngine()
         except ImportError:
             return results
@@ -916,24 +1098,28 @@ class DailyAnalysisService:
                     )
                     if result.recommendation != "no_bet":
                         edge = max(result.ev_over, result.ev_under)
-                        results.append(PropAnalysisItem(
-                            player_name=result.player_name,
-                            prop_type="HITS",
-                            line_value=result.line_value,
-                            predicted_mean=result.predicted_mean,
-                            prob_over=result.prob_over,
-                            prob_under=result.prob_under,
-                            ev_over=result.ev_over,
-                            ev_under=result.ev_under,
-                            recommendation=result.recommendation,
-                            edge_pct=round(edge * 100, 1),
-                            kelly_fraction=result.kelly_fraction,
-                        ))
+                        results.append(
+                            PropAnalysisItem(
+                                player_name=result.player_name,
+                                prop_type="HITS",
+                                line_value=result.line_value,
+                                predicted_mean=result.predicted_mean,
+                                prob_over=result.prob_over,
+                                prob_under=result.prob_under,
+                                ev_over=result.ev_over,
+                                ev_under=result.ev_under,
+                                recommendation=result.recommendation,
+                                edge_pct=round(edge * 100, 1),
+                                kelly_fraction=result.kelly_fraction,
+                            )
+                        )
                 except Exception:
                     continue
 
-        for side, pitcher_data in [("home", pitchers.get("home", {})),
-                                    ("away", pitchers.get("away", {}))]:
+        for side, pitcher_data in [
+            ("home", pitchers.get("home", {})),
+            ("away", pitchers.get("away", {})),
+        ]:
             if not pitcher_data.get("player_id"):
                 continue
             velo = pitcher_data.get("avg_velo_30d", 93.0) or 93.0
@@ -960,35 +1146,49 @@ class DailyAnalysisService:
                 )
                 if result.recommendation != "no_bet":
                     edge = max(result.ev_over, result.ev_under)
-                    results.append(PropAnalysisItem(
-                        player_name=result.player_name,
-                        prop_type="STRIKEOUTS",
-                        line_value=result.line_value,
-                        predicted_mean=result.predicted_mean,
-                        prob_over=result.prob_over,
-                        prob_under=result.prob_under,
-                        ev_over=result.ev_over,
-                        ev_under=result.ev_under,
-                        recommendation=result.recommendation,
-                        edge_pct=round(edge * 100, 1),
-                        kelly_fraction=result.kelly_fraction,
-                    ))
+                    results.append(
+                        PropAnalysisItem(
+                            player_name=result.player_name,
+                            prop_type="STRIKEOUTS",
+                            line_value=result.line_value,
+                            predicted_mean=result.predicted_mean,
+                            prob_over=result.prob_over,
+                            prob_under=result.prob_under,
+                            ev_over=result.ev_over,
+                            ev_under=result.ev_under,
+                            recommendation=result.recommendation,
+                            edge_pct=round(edge * 100, 1),
+                            kelly_fraction=result.kelly_fraction,
+                        )
+                    )
             except Exception:
                 continue
 
         results.sort(key=lambda p: p.edge_pct, reverse=True)
         return results[:6]
 
-    def _generate_narrative(self, game: dict, home: str, away: str,
-                             home_win_prob: float, away_win_prob: float,
-                             mean_home_runs: float, mean_away_runs: float,
-                             pitch_home: PitchingAnalysis, pitch_away: PitchingAnalysis,
-                             off_home: OffensiveAnalysis, off_away: OffensiveAnalysis,
-                             bull_home: BullpenAnalysis, bull_away: BullpenAnalysis,
-                             weather: WeatherImpact, park: ParkFactor,
-                             fat_home: FatigueAnalysis, fat_away: FatigueAnalysis,
-                             signals: MarketSignals,
-                             rec_bet: Optional[RecommendedBet]) -> str:
+    def _generate_narrative(
+        self,
+        game: dict,
+        home: str,
+        away: str,
+        home_win_prob: float,
+        away_win_prob: float,
+        mean_home_runs: float,
+        mean_away_runs: float,
+        pitch_home: PitchingAnalysis,
+        pitch_away: PitchingAnalysis,
+        off_home: OffensiveAnalysis,
+        off_away: OffensiveAnalysis,
+        bull_home: BullpenAnalysis,
+        bull_away: BullpenAnalysis,
+        weather: WeatherImpact,
+        park: ParkFactor,
+        fat_home: FatigueAnalysis,
+        fat_away: FatigueAnalysis,
+        signals: MarketSignals,
+        rec_bet: RecommendedBet | None,
+    ) -> str:
         home_name = _team_name(home)
         away_name = _team_name(away)
         favorite = home_name if home_win_prob >= away_win_prob else away_name
@@ -998,16 +1198,20 @@ class DailyAnalysisService:
 
         paragraphs = []
 
-        intro = (f"{favorite} ({fav_prob:.0f}%) vs {underdog} ({under_prob:.0f}%): "
-                 f"{favorite} es el favorito según el modelo Monte Carlo con un {fav_prob:.0f}% "
-                 f"de probabilidad de victoria. El marcador proyectado es "
-                 f"{_team_name(home) if home_win_prob >= away_win_prob else _team_name(away)} "
-                 f"{max(mean_home_runs, mean_away_runs):.1f} - "
-                 f"{min(mean_home_runs, mean_away_runs):.1f}.")
+        intro = (
+            f"{favorite} ({fav_prob:.0f}%) vs {underdog} ({under_prob:.0f}%): "
+            f"{favorite} es el favorito según el modelo Monte Carlo con un {fav_prob:.0f}% "
+            f"de probabilidad de victoria. El marcador proyectado es "
+            f"{_team_name(home) if home_win_prob >= away_win_prob else _team_name(away)} "
+            f"{max(mean_home_runs, mean_away_runs):.1f} - "
+            f"{min(mean_home_runs, mean_away_runs):.1f}."
+        )
         paragraphs.append(intro)
 
         pitch_parts = []
-        pitch_parts.append(f"En el montículo, {pitch_home.pitcher_name} ({pitch_home.throws}) abrirá por {home_name}")
+        pitch_parts.append(
+            f"En el montículo, {pitch_home.pitcher_name} ({pitch_home.throws}) abrirá por {home_name}"
+        )
         if pitch_home.fip_30d:
             pitch_parts.append(f"con FIP de {pitch_home.fip_30d:.2f}")
         if pitch_home.avg_velo_30d:
@@ -1031,7 +1235,9 @@ class DailyAnalysisService:
             )
 
         if bull_home.bullpen_era_30d and bull_away.bullpen_era_30d:
-            better_bull = home_name if bull_home.bullpen_era_30d < bull_away.bullpen_era_30d else away_name
+            better_bull = (
+                home_name if bull_home.bullpen_era_30d < bull_away.bullpen_era_30d else away_name
+            )
             paragraphs.append(
                 f"El bullpen de {better_bull} (ERA {min(bull_home.bullpen_era_30d, bull_away.bullpen_era_30d):.2f}) "
                 f"está en mejor forma que el de su oponente."
@@ -1068,7 +1274,13 @@ class DailyAnalysisService:
             paragraphs.append("🔍 " + " y ".join(signal_parts) + ", lo que indica valor oculto.")
 
         if rec_bet:
-            conf_icon = "🟢" if rec_bet.confidence == "Alta" else "🟡" if rec_bet.confidence == "Media" else "🔴"
+            conf_icon = (
+                "🟢"
+                if rec_bet.confidence == "Alta"
+                else "🟡"
+                if rec_bet.confidence == "Media"
+                else "🔴"
+            )
             paragraphs.append(
                 f"{conf_icon} Apuesta recomendada: {_team_name(rec_bet.team)} "
                 f"Moneyline ({rec_bet.odds:+d}) con un edge del {rec_bet.edge_pct:.1f}% "
@@ -1077,17 +1289,26 @@ class DailyAnalysisService:
 
         return "\n\n".join(paragraphs)
 
-    def _generate_key_factors(self, home: str, away: str,
-                               home_win_prob: float, away_win_prob: float,
-                               sim: Optional[dict], market: Optional[dict],
-                               pitchers: dict, teams_data: dict,
-                               weather_data: Optional[dict],
-                               signals: MarketSignals) -> List[str]:
+    def _generate_key_factors(
+        self,
+        home: str,
+        away: str,
+        home_win_prob: float,
+        away_win_prob: float,
+        sim: dict | None,
+        market: dict | None,
+        pitchers: dict,
+        teams_data: dict,
+        weather_data: dict | None,
+        signals: MarketSignals,
+    ) -> list[str]:
         factors = []
         fav = home if home_win_prob >= away_win_prob else away
         fav_name = _team_name(fav)
 
-        factors.append(f"{fav_name} favorito con {max(home_win_prob, away_win_prob) * 100:.0f}% de win probability")
+        factors.append(
+            f"{fav_name} favorito con {max(home_win_prob, away_win_prob) * 100:.0f}% de win probability"
+        )
 
         if market:
             if market.get("sharp_money_flag"):

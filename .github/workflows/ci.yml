@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - run: pip install ruff
+
+      - name: Check lint
+        run: ruff check .
+
+      - name: Check format
+        run: ruff format --check .
+
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install runtime deps
+        run: pip install -r requirements.txt
+
+      - name: Install dev deps
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: python -m pytest 8_tests/ -v --tb=short --cov=. --cov-report=term --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -t mlb-api -f Dockerfile.api .
+
+      - name: Build ETL image
+        run: docker build -t mlb-etl -f Dockerfile.etl .

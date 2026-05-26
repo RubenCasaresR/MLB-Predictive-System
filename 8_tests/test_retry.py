@@ -1,17 +1,19 @@
 """Tests para etl/retry.py (with_retry decorator)."""
 
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
 import pytest
-import sys, os
-from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from etl.retry import with_retry
 
-
 # ============================================================================
 # Estructura del decorador
 # ============================================================================
+
 
 class TestDecoratorStructure:
     def test_returns_callable(self):
@@ -22,12 +24,14 @@ class TestDecoratorStructure:
         @with_retry()
         def foo():
             return 42
+
         assert foo() == 42
 
     def test_preserves_func_name(self):
         @with_retry()
         def my_function():
             pass
+
         assert my_function.__name__ == "my_function"
 
 
@@ -35,11 +39,13 @@ class TestDecoratorStructure:
 # Éxito en primer intento
 # ============================================================================
 
+
 class TestSuccessFirstTry:
     def test_returns_value(self):
         @with_retry()
         def foo():
             return "ok"
+
         assert foo() == "ok"
 
     def test_called_once(self):
@@ -58,18 +64,21 @@ class TestSuccessFirstTry:
         @with_retry()
         def add(a, b):
             return a + b
+
         assert add(3, 4) == 7
 
     def test_kwargs_preserved(self):
         @with_retry()
         def kw(**kwargs):
             return kwargs
+
         assert kw(x=1, y=2) == {"x": 1, "y": 2}
 
 
 # ============================================================================
 # Reintentos (retryable exceptions)
 # ============================================================================
+
 
 class TestRetryThenSuccess:
     def test_second_try_succeeds(self):
@@ -190,6 +199,7 @@ class TestCustomRetryableExceptions:
 # max_retries edge cases
 # ============================================================================
 
+
 class TestMaxRetriesEdgeCases:
     def test_max_retries_one(self):
         call_count = 0
@@ -225,6 +235,7 @@ class TestMaxRetriesEdgeCases:
 # ============================================================================
 # Exponential backoff
 # ============================================================================
+
 
 class TestExponentialBackoff:
     def test_delay_increases(self):
@@ -298,6 +309,7 @@ class TestExponentialBackoff:
 # Default retryable exceptions
 # ============================================================================
 
+
 class TestDefaultExceptions:
     def test_connection_error_is_retryable(self):
         call_count = 0
@@ -333,6 +345,7 @@ class TestDefaultExceptions:
 # ============================================================================
 # Uso real: coincide con como lo usan los ingestores
 # ============================================================================
+
 
 class TestUsagePatterns:
     def test_empty_parentheses_pattern(self):

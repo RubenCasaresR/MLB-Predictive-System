@@ -1,13 +1,15 @@
 """Tests para StatcastIngestor (parseo con datos mock)."""
 
-import pytest
-import sys, os, json
+import json
+import os
+import sys
 from datetime import date
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from etl.ingestors.statcast_ingestor import StatcastIngestor
-
 
 SAMPLE_PLAY = {
     "result": {
@@ -166,7 +168,11 @@ class TestParsePlayByPlay:
         raw_data = {
             "allPlays": [
                 SAMPLE_PLAY,
-                dict(SAMPLE_PLAY, atBatIndex=2, result=dict(SAMPLE_PLAY["result"], event="strikeout", homeScore=1)),
+                dict(
+                    SAMPLE_PLAY,
+                    atBatIndex=2,
+                    result=dict(SAMPLE_PLAY["result"], event="strikeout", homeScore=1),
+                ),
             ]
         }
         result = ingestor.parse_playbyplay(raw_data, "2026-05-20-NYY-BOS")
@@ -177,10 +183,16 @@ class TestParsePlayByPlay:
     def test_tracks_scores_correctly(self, ingestor):
         raw_data = {
             "allPlays": [
-                dict(SAMPLE_PLAY, atBatIndex=1,
-                     result=dict(SAMPLE_PLAY["result"], event="home_run", homeScore=2, awayScore=0)),
-                dict(SAMPLE_PLAY, atBatIndex=2,
-                     result=dict(SAMPLE_PLAY["result"], event="walk", homeScore=2, awayScore=0)),
+                dict(
+                    SAMPLE_PLAY,
+                    atBatIndex=1,
+                    result=dict(SAMPLE_PLAY["result"], event="home_run", homeScore=2, awayScore=0),
+                ),
+                dict(
+                    SAMPLE_PLAY,
+                    atBatIndex=2,
+                    result=dict(SAMPLE_PLAY["result"], event="walk", homeScore=2, awayScore=0),
+                ),
             ]
         }
         # First play: home_score_before=0, away_score_before=0
@@ -195,37 +207,56 @@ class TestParsePlayByPlay:
 class TestLoadToDatabase:
     def test_upserts_at_bats_and_pitches(self, ingestor):
         from sqlalchemy import create_engine, text
+
         engine = create_engine("sqlite://")
         ingestor.engine = engine
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS players (
                     player_id INTEGER PRIMARY KEY,
                     full_name TEXT
                 )
-            """))
-            conn.execute(text("""
+            """)
+            )
+            conn.execute(
+                text("""
                 INSERT INTO players (player_id, full_name) VALUES (201, 'Test Pitcher')
-            """))
-            conn.execute(text("""
+            """)
+            )
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS at_bats (
                     ab_id INTEGER PRIMARY KEY,
                     game_id TEXT,
                     pitcher_id INTEGER REFERENCES players(player_id),
                     events TEXT
                 )
-            """))
-            conn.execute(text("""
+            """)
+            )
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS pitches (
                     pitch_id INTEGER PRIMARY KEY,
                     ab_id INTEGER,
                     release_speed REAL
                 )
-            """))
+            """)
+            )
         game_data = {
             "at_bats": [
-                {"ab_id": 1, "game_id": "2026-05-20-NYY-BOS", "pitcher_id": 201, "events": "single"},
-                {"ab_id": 2, "game_id": "2026-05-20-NYY-BOS", "pitcher_id": 201, "events": "strikeout"},
+                {
+                    "ab_id": 1,
+                    "game_id": "2026-05-20-NYY-BOS",
+                    "pitcher_id": 201,
+                    "events": "single",
+                },
+                {
+                    "ab_id": 2,
+                    "game_id": "2026-05-20-NYY-BOS",
+                    "pitcher_id": 201,
+                    "events": "strikeout",
+                },
             ],
             "pitches": [
                 {"pitch_id": 1, "ab_id": 1, "release_speed": 95.5},
@@ -241,15 +272,18 @@ class TestLoadToDatabase:
 
     def test_skip_empty_at_bats(self, ingestor):
         from sqlalchemy import create_engine, text
+
         engine = create_engine("sqlite://")
         ingestor.engine = engine
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS at_bats (
                     ab_id INTEGER PRIMARY KEY,
                     game_id TEXT
                 )
-            """))
+            """)
+            )
         game_data = {"at_bats": [], "pitches": []}
         ingestor.load_to_database(game_data, "2026-05-20-NYY-BOS")
         with engine.connect() as conn:
@@ -260,29 +294,52 @@ class TestLoadToDatabase:
 class TestFetchDailyGames:
     def test_parse_schedule_response(self, ingestor, monkeypatch):
         mock_response = {
-            "dates": [{
-                "date": "2026-05-20",
-                "games": [{
-                    "gamePk": 123456,
-                    "teams": {
-                        "home": {"team": {"abbreviation": "BOS", "id": 99901, "name": "Boston Red Sox"}, "probablePitcher": {"id": 601}},
-                        "away": {"team": {"abbreviation": "NYY", "id": 99902, "name": "New York Yankees"}},
-                    },
-                    "status": {"detailedState": "SCHEDULED"},
-                    "venue": {"id": 3},
-                    "gameDate": "2026-05-20T19:10:00Z",
-                }],
-            }],
+            "dates": [
+                {
+                    "date": "2026-05-20",
+                    "games": [
+                        {
+                            "gamePk": 123456,
+                            "teams": {
+                                "home": {
+                                    "team": {
+                                        "abbreviation": "BOS",
+                                        "id": 99901,
+                                        "name": "Boston Red Sox",
+                                    },
+                                    "probablePitcher": {"id": 601},
+                                },
+                                "away": {
+                                    "team": {
+                                        "abbreviation": "NYY",
+                                        "id": 99902,
+                                        "name": "New York Yankees",
+                                    }
+                                },
+                            },
+                            "status": {"detailedState": "SCHEDULED"},
+                            "venue": {"id": 3},
+                            "gameDate": "2026-05-20T19:10:00Z",
+                        }
+                    ],
+                }
+            ],
         }
 
         def mock_get(*args, **kwargs):
             class MockResponse:
-                def raise_for_status(self): pass
-                def json(self): return mock_response
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return mock_response
+
                 ok = True
+
             return MockResponse()
 
         import requests
+
         monkeypatch.setattr(requests, "get", mock_get)
         df = ingestor.fetch_daily_games(date(2026, 5, 20))
         assert len(df) == 1

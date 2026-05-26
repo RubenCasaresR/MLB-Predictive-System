@@ -1,0 +1,77 @@
+# =============================================================================
+# ruff configuration for MLB Predictive System
+# =============================================================================
+
+target-version = "py312"
+
+# Line length matching existing codebase style
+line-length = 100
+
+# Exclude generated / vendored / data directories
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "data",
+    "logs",
+    "models",
+    "node_modules",
+    "mlb_predictive.egg-info",
+    "tmp_*",
+    "fix_*",
+    "fix_*.py",
+    "check_*.py",
+    "clear_*.py",
+    "add_*.py",
+    "run_full_*.py",
+    "run_in*.py",
+]
+
+# Enable rules
+lint.select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort (import ordering)
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "YTT",  # flake8-2020
+    "RUF",  # ruff-specific
+]
+
+# Ignore specific rules that conflict with project style
+lint.ignore = [
+    "E402",  # module-level import not at top (local imports to avoid circular)
+    "E501",  # line-too-long (line-length handles it)
+    "E701",  # multiple statements on one line (compact if/return patterns)
+    "E712",  # equality comparison to True (pandas boolean indexing)
+    "E741",  # ambiguous variable name (pre-existing patterns)
+    "F401",  # unused imports — pre-existing in risk/, features/, prediction/
+    "F523",  # .format extra arguments (pre-existing in seed migrations)
+    "F524",  # .format missing arguments (pre-existing in seed migrations)
+    "F541",  # f-string without placeholders (pre-existing in debug prints)
+    "F811",  # redefinition of unused variable (test fixtures)
+    "F841",  # unused variables — pre-existing
+    "N802",  # function names in snake_case (DB columns use mixed case)
+    "N803",  # argument name should be lowercase (X_train, X_test patterns)
+    "N806",  # variable in function should be lowercase (model params)
+    "N815",  # mixed-case class constants (DB table names)
+    "N999",  # invalid module name (8_tests prefix)
+    "RUF003",# ambiguous comment character (non-ASCII × in tests)
+    "RUF005",# consider list unpacking (pre-existing)
+    "RUF012",# mutable class defaults (pre-existing ClassVar pattern)
+    "RUF013",# implicit Optional (pre-existing)
+    "RUF015",# prefer next() over single-element slice (pre-existing)
+    "RUF034",# useless if-else (pre-existing pandas pattern)
+    "RUF046",# unnecessary int() cast (pre-existing)
+    "RUF059",# unpacked variable never used (pre-existing)
+    "UP035", # typing deprecation (pre-existing Dict/List/Tuple usage)
+]
+
+# Allow fix for auto-fixable rules
+lint.fixable = ["I", "UP", "RUF"]
+unsafe-fixes = false
+
+# Formatting — matches black defaults
+format.quote-style = "double"
+format.indent-style = "space"

@@ -7,11 +7,12 @@
 # =============================================================================
 
 import os
-from dotenv import load_dotenv
-load_dotenv()
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ============================================================================
 # BASE DE DATOS
@@ -28,7 +29,7 @@ DB_CONFIG = {
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
-    f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+    f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}",
 )
 
 
@@ -66,8 +67,8 @@ MARKET_PRE_GAME_WINDOW_HOURS = 3  # 3 horas antes del juego
 MONTE_CARLO_DEFAULT_ITERATIONS = 10000
 MONTE_CARLO_SEED = 42
 
-KELLY_FRACTION = 0.25      # Kelly fraccional (25%)
-MAX_KELLY_BET = 0.05       # Máximo 5% del bankroll por apuesta
+KELLY_FRACTION = 0.25  # Kelly fraccional (25%)
+MAX_KELLY_BET = 0.05  # Máximo 5% del bankroll por apuesta
 EV_MINIMUM_THRESHOLD = 0.02  # Mínimo 2% de EV para considerar apuesta
 
 BANKROLL_INITIAL = float(os.getenv("BANKROLL_INITIAL", "10000"))
@@ -95,15 +96,22 @@ PATHS = {
 
 
 # ============================================================================
+# JWT / AUTENTICACIÓN
+# ============================================================================
+
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_ALGORITHM = "HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+
+
+# ============================================================================
 # LOGGING
 # ============================================================================
 
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "standard": {
-            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-        },
+        "standard": {"format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"},
     },
     "handlers": {
         "console": {

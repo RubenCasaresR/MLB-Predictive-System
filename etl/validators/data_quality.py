@@ -4,10 +4,11 @@
 # Rubén Eduardo Casares Rosales - MLB Predictive System
 # =============================================================================
 
-from typing import Dict, List, Tuple, Optional
-import pandas as pd
-import numpy as np
 import logging
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class DataQualityValidator:
         "away_moneyline_open": (-500, 500),
     }
 
-    def validate_null_counts(self, df: pd.DataFrame, name: str = "") -> List[str]:
+    def validate_null_counts(self, df: pd.DataFrame, name: str = "") -> list[str]:
         issues = []
         null_pcts = df.isnull().mean()
         for col, pct in null_pcts.items():
@@ -38,7 +39,7 @@ class DataQualityValidator:
                 issues.append(f"{name}: {col} tiene {pct:.1%} nulos (>{self.NULL_THRESHOLD:.0%})")
         return issues
 
-    def validate_ranges(self, df: pd.DataFrame, name: str = "") -> List[str]:
+    def validate_ranges(self, df: pd.DataFrame, name: str = "") -> list[str]:
         issues = []
         for col, (lo, hi) in self.RANGE_CHECKS.items():
             if col in df.columns:
@@ -46,10 +47,14 @@ class DataQualityValidator:
                 if len(out_of_range) > 0:
                     pct = len(out_of_range) / len(df)
                     if pct > 0.01:
-                        issues.append(f"{name}: {col} tiene {pct:.1%} valores fuera de rango [{lo}, {hi}]")
+                        issues.append(
+                            f"{name}: {col} tiene {pct:.1%} valores fuera de rango [{lo}, {hi}]"
+                        )
         return issues
 
-    def validate_unique_keys(self, df: pd.DataFrame, key_cols: List[str], name: str = "") -> List[str]:
+    def validate_unique_keys(
+        self, df: pd.DataFrame, key_cols: list[str], name: str = ""
+    ) -> list[str]:
         issues = []
         dups = df.duplicated(subset=key_cols, keep=False)
         if dups.any():
@@ -57,7 +62,7 @@ class DataQualityValidator:
             issues.append(f"{name}: {count} duplicados en clave {key_cols}")
         return issues
 
-    def validate_pitch_consistency(self, pitches: pd.DataFrame) -> List[str]:
+    def validate_pitch_consistency(self, pitches: pd.DataFrame) -> list[str]:
         issues = []
         if "strike" in pitches.columns and "ball" in pitches.columns:
             both = pitches[(pitches["strike"] == True) & (pitches["ball"] == True)]
@@ -65,7 +70,7 @@ class DataQualityValidator:
                 issues.append(f"Pitches marcados como strike y ball: {len(both)}")
         return issues
 
-    def validate_pitcher_usage(self, at_bats: pd.DataFrame) -> List[str]:
+    def validate_pitcher_usage(self, at_bats: pd.DataFrame) -> list[str]:
         issues = []
         if "pitcher_id" in at_bats.columns and "game_id" in at_bats.columns:
             usage = at_bats.groupby(["game_id", "pitcher_id"]).size()
@@ -74,7 +79,7 @@ class DataQualityValidator:
                 issues.append(f"Pitchers con >40 batters faced: {len(excessive)} instancias")
         return issues
 
-    def report(self, df: pd.DataFrame, name: str = "") -> Dict:
+    def report(self, df: pd.DataFrame, name: str = "") -> dict:
         issues = []
         issues.extend(self.validate_null_counts(df, name))
         issues.extend(self.validate_ranges(df, name))
@@ -96,11 +101,13 @@ if __name__ == "__main__":
 
     validator = DataQualityValidator()
 
-    sample = pd.DataFrame({
-        "release_speed": [95, 70, 98, None, 102],
-        "release_spin_rate": [2400, 200, 2500, 2600, None],
-        "inning": [1, 2, 3, 4, 25],
-    })
+    sample = pd.DataFrame(
+        {
+            "release_speed": [95, 70, 98, None, 102],
+            "release_spin_rate": [2400, 200, 2500, 2600, None],
+            "inning": [1, 2, 3, 4, 25],
+        }
+    )
 
     report = validator.report(sample, "pitches_test")
     print(f"Passed: {report['passed']}")

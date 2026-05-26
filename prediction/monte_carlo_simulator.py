@@ -15,12 +15,16 @@
 #         distribución de carrés, y recomendaciones EV+.
 # =============================================================================
 
+import logging
 import math
-from typing import Dict, List, Optional, Tuple, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
-import logging
+import pandas as pd
+from catboost import CatBoostClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +33,17 @@ logger = logging.getLogger(__name__)
 # TIPOS Y ENUMS
 # ============================================================================
 
+
 class PAOutcome(Enum):
-    OUT          = "out"
-    SINGLE       = "single"
-    DOUBLE       = "double"
-    TRIPLE       = "triple"
-    HOME_RUN     = "home_run"
-    WALK         = "walk"
+    OUT = "out"
+    SINGLE = "single"
+    DOUBLE = "double"
+    TRIPLE = "triple"
+    HOME_RUN = "home_run"
+    WALK = "walk"
     HIT_BY_PITCH = "hit_by_pitch"
-    SACRIFICE    = "sacrifice"
-    ERROR        = "error"
+    SACRIFICE = "sacrifice"
+    ERROR = "error"
     FIELDERS_CHOICE = "fielders_choice"
 
 
@@ -54,6 +59,12 @@ class BatterState:
     hr_rate: float = 0.030
     groundball_rate: float = 0.440
     flyball_rate: float = 0.350
+    woba_30d: float = 0.320
+    k_pct_30d: float = 22.0
+    bb_pct_30d: float = 8.5
+    slg_30d: float = 0.420
+    hard_hit_pct_30d: float = 38.0
+    barrel_pct_30d: float = 8.0
 
 
 @dataclass
@@ -70,6 +81,13 @@ class PitcherState:
     avg_spin: float = 2200.0
     fatigue_factor: float = 1.0
     pitch_count: int = 0
+    k_per_9_30d: float = 8.0
+    bb_per_9_30d: float = 3.0
+    hr_per_9_30d: float = 1.2
+    fip_30d: float = 4.20
+    avg_velo_30d: float = 93.0
+    whiff_pct_30d: float = 24.0
+    is_bullpen: bool = False
 
     def apply_fatigue(self, pitches_thrown: int):
         self.pitch_count = pitches_thrown
@@ -88,7 +106,7 @@ class GameState:
     inning: int = 1
     half: str = "top"
     outs: int = 0
-    bases: Tuple[bool, bool, bool] = (False, False, False)
+    bases: tuple[bool, bool, bool] = (False, False, False)
     home_pitch_count: int = 0
     away_pitch_count: int = 0
     is_final: bool = False
@@ -116,8 +134,8 @@ class SimulationResult:
     mean_away_runs: float
     std_home_runs: float
     std_away_runs: float
-    home_run_distribution: Dict[int, float]
-    away_run_distribution: Dict[int, float]
+    home_run_distribution: dict[int, float]
+    away_run_distribution: dict[int, float]
     n_iterations: int
     home_runs_array: np.ndarray
     away_runs_array: np.ndarray
@@ -150,9 +168,7 @@ class SimulationResult:
         kelly = max(0.0, min(kelly * fraction, 0.05))
         return kelly
 
-    def get_ev_positive_bets(
-        self, home_odds: int, away_odds: int, min_ev: float = 0.02
-    ) -> Dict:
+    def get_ev_positive_bets(self, home_odds: int, away_odds: int, min_ev: float = 0.02) -> dict:
         home_implied_raw = self.american_to_implied(home_odds)
         away_implied_raw = self.american_to_implied(away_odds)
         total_implied = home_implied_raw + away_implied_raw
@@ -176,15 +192,11 @@ class SimulationResult:
 
         if home_ev >= min_ev and home_ev > away_ev:
             result["recommendation"] = "home"
-            result["kelly_fraction"] = round(
-                self.kelly_fraction(self.home_win_prob, home_odds), 4
-            )
+            result["kelly_fraction"] = round(self.kelly_fraction(self.home_win_prob, home_odds), 4)
             result["expected_value"] = round(home_ev, 4)
         elif away_ev >= min_ev and away_ev > home_ev:
             result["recommendation"] = "away"
-            result["kelly_fraction"] = round(
-                self.kelly_fraction(self.away_win_prob, away_odds), 4
-            )
+            result["kelly_fraction"] = round(self.kelly_fraction(self.away_win_prob, away_odds), 4)
             result["expected_value"] = round(away_ev, 4)
 
         return result
@@ -193,6 +205,7 @@ class SimulationResult:
 # ============================================================================
 # NÚCLEO DE LA SIMULACIÓN
 # ============================================================================
+
 
 class MonteCarloMLBSimulator:
     MAX_INNINGS = 9
@@ -211,18 +224,243 @@ class MonteCarloMLBSimulator:
     LEAGUE_AVG_BB_RATE = 0.085
     LEAGUE_AVG_HR_RATE = 0.030
 
-    def __init__(self, seed: Optional[int] = None):
+    MODEL_PATH: str = "models/pa_multiclass_model.cbm"
+
+    CATEGORICAL_FEATURES: list[str] = [
+        "stadium_id",
+        "umpire_id",
+        "batter_id",
+        "pitcher_id",
+        "batter_bats",
+        "pitcher_throws",
+        "half_inning",
+        "wind_direction",
+    ]
+
+    NUMERIC_FEATURES: list[str] = [
+        "inning",
+        "outs_before",
+        "k_per_9_30d",
+        "bb_per_9_30d",
+        "hr_per_9_30d",
+        "fip_30d",
+        "avg_velo_30d",
+        "whiff_pct_30d",
+        "woba_30d",
+        "k_pct_30d",
+        "bb_pct_30d",
+        "slg_30d",
+        "hard_hit_pct_30d",
+        "barrel_pct_30d",
+        "park_hr",
+        "park_k",
+        "park_woba",
+        "temperature",
+        "wind_speed",
+        "umpire_cs_rate",
+        "bullpen_fip_30d",
+    ]
+
+    DERIVED_FEATURES: list[str] = [
+        "has_platoon_advantage",
+        "heat_stress",
+        "cold_stress",
+        "late_inning",
+        "is_bullpen_active",
+    ]
+
+    FEATURE_COLS: list[str] = CATEGORICAL_FEATURES + NUMERIC_FEATURES + DERIVED_FEATURES
+
+    MODEL_DEFAULTS: dict = {
+        "k_per_9_30d": 8.0,
+        "bb_per_9_30d": 3.0,
+        "hr_per_9_30d": 1.2,
+        "fip_30d": 4.20,
+        "avg_velo_30d": 93.0,
+        "whiff_pct_30d": 24.0,
+        "k_pct_30d": 22.0,
+        "bb_pct_30d": 8.5,
+        "park_k": 1.0,
+        "park_woba": 1.0,
+        "park_hr": 1.0,
+        "temperature": 70.0,
+        "wind_speed": 0.0,
+        "umpire_cs_rate": 0.63,
+        "bullpen_fip_30d": 4.50,
+    }
+
+    def __init__(self, model_path: str | None = None, seed: int | None = None):
         self.rng = np.random.default_rng(seed)
+        self._model: CatBoostClassifier | None = None
+        load_path = model_path or self.MODEL_PATH
+        try:
+            self._model = CatBoostClassifier()
+            self._model.load_model(load_path)
+            logger.info(f"Model loaded from {load_path}")
+        except Exception as e:
+            logger.warning(f"Could not load model from {load_path}: {e}. Using heuristic fallback.")
+            self._model = None
         logger.info(f"MonteCarloMLBSimulator initialized (seed={seed})")
+
+    # ------------------------------------------------------------------
+    # CONSTRUCCIÓN DE FEATURE VECTOR
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _has_platoon_advantage(batter_bats: str, pitcher_throws: str) -> int:
+        return int(
+            (batter_bats == "L" and pitcher_throws == "R")
+            or (batter_bats == "R" and pitcher_throws == "L")
+            or (batter_bats == "S")
+        )
+
+    def _build_feature_vector(
+        self,
+        batter: BatterState,
+        pitcher: PitcherState,
+        inning: int,
+        outs_before: int,
+        half_inning: str,
+        stadium_id: int,
+        umpire_id: int,
+        park_hr: float,
+        park_k: float,
+        park_woba: float,
+        temperature: float,
+        wind_speed: float,
+        wind_direction: str,
+        umpire_cs_rate: float,
+        bullpen_fip_30d: float,
+        is_bullpen_active: int,
+    ) -> pd.DataFrame:
+        row = {
+            "stadium_id": stadium_id,
+            "umpire_id": umpire_id,
+            "batter_id": batter.player_id,
+            "pitcher_id": pitcher.player_id if not pitcher.is_bullpen else 0,
+            "batter_bats": batter.bats,
+            "pitcher_throws": pitcher.throws,
+            "half_inning": half_inning,
+            "wind_direction": wind_direction,
+            "inning": inning,
+            "outs_before": outs_before,
+            "k_per_9_30d": pitcher.k_per_9_30d,
+            "bb_per_9_30d": pitcher.bb_per_9_30d,
+            "hr_per_9_30d": pitcher.hr_per_9_30d,
+            "fip_30d": pitcher.fip_30d,
+            "avg_velo_30d": pitcher.avg_velo_30d,
+            "whiff_pct_30d": pitcher.whiff_pct_30d,
+            "woba_30d": batter.woba_30d,
+            "k_pct_30d": batter.k_pct_30d,
+            "bb_pct_30d": batter.bb_pct_30d,
+            "slg_30d": batter.slg_30d,
+            "hard_hit_pct_30d": batter.hard_hit_pct_30d,
+            "barrel_pct_30d": batter.barrel_pct_30d,
+            "park_hr": park_hr,
+            "park_k": park_k,
+            "park_woba": park_woba,
+            "temperature": temperature,
+            "wind_speed": wind_speed,
+            "umpire_cs_rate": umpire_cs_rate,
+            "bullpen_fip_30d": bullpen_fip_30d,
+            "has_platoon_advantage": self._has_platoon_advantage(batter.bats, pitcher.throws),
+            "heat_stress": max(0.0, (temperature - 80) / 40.0),
+            "cold_stress": max(0.0, (50 - temperature) / 30.0),
+            "late_inning": 1 if inning >= 7 else 0,
+            "is_bullpen_active": is_bullpen_active,
+        }
+        df = pd.DataFrame([row])
+        for col in self.CATEGORICAL_FEATURES:
+            if col in df.columns:
+                df[col] = df[col].fillna("__MISSING__")
+        for col, val in self.MODEL_DEFAULTS.items():
+            if col in df.columns:
+                df[col] = df[col].fillna(val)
+        return df[self.FEATURE_COLS]
+
+    def _predict_probs(self, feature_vec: pd.DataFrame) -> np.ndarray:
+        if self._model is not None:
+            return self._model.predict_proba(feature_vec)[0]
+        return self._heuristic_fallback(feature_vec)
+
+    def _heuristic_fallback(self, _feature_vec: pd.DataFrame) -> np.ndarray:
+        probs = np.array([0.310, 0.155, 0.045, 0.005, 0.030, 0.085, 0.010, 0.045])
+        return probs / probs.sum()
 
     # ------------------------------------------------------------------
     # MÉTODO PRINCIPAL
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _make_bullpen_state(original: PitcherState, bullpen_fip: float) -> PitcherState:
+        return PitcherState(
+            player_id=0,
+            name=f"Bullpen_{original.name.split('_')[0]}",
+            throws=original.throws,
+            k_rate=0.230,
+            bb_rate=0.090,
+            hr_rate=0.032,
+            groundball_rate=0.420,
+            whiff_pct=0.120,
+            avg_velo=94.0,
+            avg_spin=2300.0,
+            fatigue_factor=1.0,
+            pitch_count=0,
+            k_per_9_30d=9.0,
+            bb_per_9_30d=3.5,
+            hr_per_9_30d=1.3,
+            fip_30d=bullpen_fip,
+            avg_velo_30d=94.0,
+            whiff_pct_30d=25.0,
+            is_bullpen=True,
+        )
+
+    def _precompute_probs(
+        self,
+        lineup: list[BatterState],
+        pitcher: PitcherState,
+        inning: int,
+        outs_before: int,
+        half_inning: str,
+        stadium_id: int,
+        umpire_id: int,
+        park_hr: float,
+        park_k: float,
+        park_woba: float,
+        temperature: float,
+        wind_speed: float,
+        wind_direction: str,
+        umpire_cs_rate: float,
+        bullpen_fip_30d: float,
+        is_bullpen_active: int,
+    ) -> list[np.ndarray]:
+        probs = []
+        for b in lineup:
+            fv = self._build_feature_vector(
+                batter=b,
+                pitcher=pitcher,
+                inning=inning,
+                outs_before=outs_before,
+                half_inning=half_inning,
+                stadium_id=stadium_id,
+                umpire_id=umpire_id,
+                park_hr=park_hr,
+                park_k=park_k,
+                park_woba=park_woba,
+                temperature=temperature,
+                wind_speed=wind_speed,
+                wind_direction=wind_direction,
+                umpire_cs_rate=umpire_cs_rate,
+                bullpen_fip_30d=bullpen_fip_30d,
+                is_bullpen_active=is_bullpen_active,
+            )
+            probs.append(self._predict_probs(fv))
+        return probs
+
     def run_simulation(
         self,
-        home_lineup: List[BatterState],
-        away_lineup: List[BatterState],
+        home_lineup: list[BatterState],
+        away_lineup: list[BatterState],
         home_pitcher: PitcherState,
         away_pitcher: PitcherState,
         park_factor_hr: float = 1.0,
@@ -232,6 +470,10 @@ class MonteCarloMLBSimulator:
         wind_speed: float = 0.0,
         wind_direction: str = "NONE",
         umpire_cs_rate: float = 0.0,
+        stadium_id: int = 0,
+        umpire_id: int = 0,
+        home_bullpen_fip_30d: float = 4.50,
+        away_bullpen_fip_30d: float = 4.50,
         home_bullpen_era: float = 4.50,
         away_bullpen_era: float = 4.50,
         home_rest_days: int = 4,
@@ -241,41 +483,64 @@ class MonteCarloMLBSimulator:
         home_tz_crossings: int = 0,
         away_tz_crossings: int = 0,
         n_iterations: int = 10000,
-        progress_callback: Optional[Callable] = None,
+        progress_callback: Callable | None = None,
     ) -> SimulationResult:
 
-        home_probs = [
-            self._build_batter_probs(
-                b, away_pitcher, park_factor_hr, park_factor_single, park_factor_k,
-                temperature_f=temperature_f,
-                wind_speed=wind_speed,
-                wind_direction=wind_direction,
-                umpire_cs_rate=umpire_cs_rate,
-                batter_rest_days=home_rest_days,
-                batter_travel_miles=home_travel_miles,
-                batter_tz_crossings=home_tz_crossings,
-                is_home=True,
-            )
-            for b in home_lineup
-        ]
-        away_probs = [
-            self._build_batter_probs(
-                b, home_pitcher, park_factor_hr, park_factor_single, park_factor_k,
-                temperature_f=temperature_f,
-                wind_speed=wind_speed,
-                wind_direction=wind_direction,
-                umpire_cs_rate=umpire_cs_rate,
-                batter_rest_days=away_rest_days,
-                batter_travel_miles=away_travel_miles,
-                batter_tz_crossings=away_tz_crossings,
-                is_home=False,
-            )
-            for b in away_lineup
-        ]
+        bp_home = self._make_bullpen_state(away_pitcher, home_bullpen_fip_30d)
+        bp_away = self._make_bullpen_state(home_pitcher, away_bullpen_fip_30d)
 
-        # Bullpen quality adjustment factors (applied to late innings)
-        home_bullpen_factor = 1.0 + (home_bullpen_era - 4.0) * 0.02
-        away_bullpen_factor = 1.0 + (away_bullpen_era - 4.0) * 0.02
+        ctx = dict(
+            stadium_id=stadium_id,
+            umpire_id=umpire_id,
+            park_hr=park_factor_hr,
+            park_k=park_factor_k,
+            park_woba=park_factor_single,
+            temperature=temperature_f,
+            wind_speed=wind_speed,
+            wind_direction=wind_direction,
+            umpire_cs_rate=umpire_cs_rate,
+        )
+
+        away_starter_probs = self._precompute_probs(
+            away_lineup,
+            home_pitcher,
+            inning=1,
+            outs_before=0,
+            half_inning="T",
+            bullpen_fip_30d=away_bullpen_fip_30d,
+            is_bullpen_active=0,
+            **ctx,
+        )
+        away_bullpen_probs = self._precompute_probs(
+            away_lineup,
+            bp_home,
+            inning=7,
+            outs_before=0,
+            half_inning="T",
+            bullpen_fip_30d=away_bullpen_fip_30d,
+            is_bullpen_active=1,
+            **ctx,
+        )
+        home_starter_probs = self._precompute_probs(
+            home_lineup,
+            away_pitcher,
+            inning=1,
+            outs_before=0,
+            half_inning="B",
+            bullpen_fip_30d=home_bullpen_fip_30d,
+            is_bullpen_active=0,
+            **ctx,
+        )
+        home_bullpen_probs = self._precompute_probs(
+            home_lineup,
+            bp_away,
+            inning=7,
+            outs_before=0,
+            half_inning="B",
+            bullpen_fip_30d=home_bullpen_fip_30d,
+            is_bullpen_active=1,
+            **ctx,
+        )
 
         home_wins = np.zeros(n_iterations, dtype=bool)
         away_wins = np.zeros(n_iterations, dtype=bool)
@@ -291,8 +556,6 @@ class MonteCarloMLBSimulator:
             sim_home_p = PitcherState(**home_pitcher.__dict__)
             sim_away_p = PitcherState(**away_pitcher.__dict__)
             home_idx, away_idx = 0, 0
-            self._home_probs_late = None
-            self._away_probs_late = None
 
             while True:
                 if state.half == "top":
@@ -301,12 +564,14 @@ class MonteCarloMLBSimulator:
                         extra_innings[it] = True
                     while state.outs < self.OUTS_PER_HALF:
                         batter_idx = away_idx % 9
-                        bp = self._get_inning_probs(
-                            away_probs[batter_idx], state.inning,
-                            away_bullpen_factor, is_away=True,
+                        use_bullpen = int(sim_home_p.pitch_count > 85 or state.inning >= 7)
+                        bp = (
+                            away_bullpen_probs[batter_idx]
+                            if use_bullpen
+                            else away_starter_probs[batter_idx]
                         )
                         outcome = self._sample_outcome(bp)
-                        self._apply_outcome(outcome, state, away_probs[batter_idx], is_home=False)
+                        self._apply_outcome(outcome, state, bp, is_home=False)
                         sim_home_p.pitch_count += 1
                         away_idx += 1
                         if self._check_game_ended(state, is_walkoff_scenario=False):
@@ -318,12 +583,14 @@ class MonteCarloMLBSimulator:
                     state.reset_half()
                     while state.outs < self.OUTS_PER_HALF:
                         batter_idx = home_idx % 9
-                        bp = self._get_inning_probs(
-                            home_probs[batter_idx], state.inning,
-                            home_bullpen_factor, is_away=False,
+                        use_bullpen = int(sim_away_p.pitch_count > 85 or state.inning >= 7)
+                        bp = (
+                            home_bullpen_probs[batter_idx]
+                            if use_bullpen
+                            else home_starter_probs[batter_idx]
                         )
                         outcome = self._sample_outcome(bp)
-                        self._apply_outcome(outcome, state, home_probs[batter_idx], is_home=True)
+                        self._apply_outcome(outcome, state, bp, is_home=True)
                         sim_away_p.pitch_count += 1
                         home_idx += 1
                         if self._check_game_ended(state, is_walkoff_scenario=True):
@@ -366,181 +633,19 @@ class MonteCarloMLBSimulator:
         )
 
     # ------------------------------------------------------------------
-    # CONSTRUCCIÓN DE MATRIZ DE PROBABILIDAD
+    # MUESTREO DE RESULTADOS
     # ------------------------------------------------------------------
-
-    def _build_batter_probs(
-        self,
-        batter: BatterState,
-        pitcher: PitcherState,
-        park_hr: float,
-        park_single: float,
-        park_k: float,
-        temperature_f: float = 70.0,
-        wind_speed: float = 0.0,
-        wind_direction: str = "NONE",
-        umpire_cs_rate: float = 0.0,
-        batter_rest_days: int = 4,
-        batter_travel_miles: int = 0,
-        batter_tz_crossings: int = 0,
-        is_home: bool = True,
-    ) -> np.ndarray:
-        prob_out = 0.310
-        prob_single = 0.155
-        prob_double = 0.045
-        prob_triple = 0.005
-        prob_hr = 0.030
-        prob_walk = 0.085
-        prob_hbp = 0.010
-        prob_sac = 0.045
-
-        # --- Platoon split ---
-        platoon = 1.0
-        if batter.bats == pitcher.throws:
-            platoon = 0.88
-        if batter.bats == 'S':
-            platoon = 0.95
-
-        # --- Pitcher quality adjustments ---
-        k_adj = (pitcher.k_rate - self.LEAGUE_AVG_K_RATE) * 2.0
-        bb_adj = (pitcher.bb_rate - self.LEAGUE_AVG_BB_RATE) * 1.5
-        hr_adj = (pitcher.hr_rate - self.LEAGUE_AVG_HR_RATE) * 1.5
-
-        # --- Park factors ---
-        prob_hr *= park_hr
-        prob_single *= park_single
-        prob_double *= (1 + (park_hr - 1) * 0.3)
-        prob_out *= park_k
-
-        # --- Fatigue adjustment ---
-        fatigue = pitcher.fatigue_factor
-        if fatigue < 1.0:
-            fatigue_penalty = 1.0 - fatigue
-            prob_hr *= (1 + fatigue_penalty * 0.3)
-            prob_single *= (1 + fatigue_penalty * 0.2)
-            prob_walk *= (1 + fatigue_penalty * 0.15)
-            prob_out *= (1 - fatigue_penalty * 0.1)
-
-        # --- Apply platoon ---
-        if platoon < 1.0:
-            hit_total = prob_single + prob_double + prob_triple + prob_hr
-            reduction = hit_total * (1.0 - platoon)
-            prob_single *= platoon
-            prob_double *= platoon
-            prob_triple *= platoon
-            prob_hr *= platoon
-            prob_out = min(0.95, prob_out + reduction * 0.5)
-            prob_walk = min(0.20, prob_walk + reduction * 0.3)
-
-        # --- Temperature effect (air density) ---
-        if temperature_f > 80:
-            heat_factor = (temperature_f - 80) / 40.0
-            prob_hr *= (1 + heat_factor * 0.08)
-            prob_single *= (1 + heat_factor * 0.03)
-        elif temperature_f < 50:
-            cold_factor = (50 - temperature_f) / 30.0
-            prob_hr *= (1 - cold_factor * 0.10)
-            prob_out *= (1 + cold_factor * 0.03)
-
-        # --- Wind effect ---
-        if wind_speed > 5:
-            wd = wind_direction.upper().replace("_", "")
-            if wd in ("OUT", "OUTC", "OUTTOCF", "LTR", "RTL"):
-                wind_factor = wind_speed * 0.006
-                prob_hr *= (1 + wind_factor)
-                prob_single *= (1 + wind_factor * 0.3)
-            elif wd in ("IN", "INC", "INFROCF"):
-                wind_factor = wind_speed * 0.004
-                prob_hr *= (1 - wind_factor)
-                prob_double *= (1 - wind_factor * 0.3)
-
-        # --- Umpire strike zone effect ---
-        if umpire_cs_rate > 0:
-            if umpire_cs_rate > 0.64:
-                wide_zone = min(0.10, (umpire_cs_rate - 0.64) * 2.0)
-                prob_out *= (1 + wide_zone * 0.3)
-                prob_walk *= (1 - wide_zone * 0.2)
-            elif umpire_cs_rate < 0.58:
-                tight_zone = min(0.10, (0.58 - umpire_cs_rate) * 2.0)
-                prob_out *= (1 - tight_zone * 0.2)
-                prob_walk *= (1 + tight_zone * 0.3)
-
-        # --- Batter travel fatigue ---
-        if batter_travel_miles > 1500:
-            travel_penalty = min(0.05, (batter_travel_miles - 1500) * 0.00002)
-            prob_single *= (1 - travel_penalty)
-            prob_double *= (1 - travel_penalty * 0.5)
-            prob_hr *= (1 - travel_penalty)
-            prob_out *= (1 + travel_penalty * 0.2)
-        if batter_tz_crossings > 1:
-            tz_penalty = (batter_tz_crossings - 1) * 0.02
-            prob_single *= (1 - tz_penalty)
-            prob_hr *= (1 - tz_penalty)
-            prob_out *= (1 + tz_penalty * 0.3)
-
-        # --- Home field advantage ---
-        if is_home:
-            prob_single *= 1.01
-            prob_double *= 1.01
-            prob_hr *= 1.005
-            prob_out *= 0.995
-
-        # --- Apply pitcher adjustments ---
-        contact_reduction = max(0, k_adj * fatigue)
-        prob_out += contact_reduction
-        hit_reduction = contact_reduction * 0.10
-        prob_single = max(0.001, prob_single - hit_reduction * 0.5)
-        prob_double = max(0.001, prob_double - hit_reduction * 0.2)
-        prob_hr = max(0.001, prob_hr - hit_reduction * 0.1)
-        prob_walk = max(0.001, prob_walk + bb_adj * fatigue)
-        prob_hr = max(0.001, prob_hr + hr_adj)
-        prob_out = max(0.001, prob_out - bb_adj * fatigue * 0.5)
-        prob_hbp = max(0.001, prob_hbp + bb_adj * 0.1)
-
-        probs = np.array([
-            prob_out, prob_single, prob_double, prob_triple,
-            prob_hr, prob_walk, prob_hbp, prob_sac,
-        ])
-        probs = np.maximum(probs, 0.001)
-        probs = probs / probs.sum()
-
-        if not math.isclose(probs.sum(), 1.0, rel_tol=1e-3):
-            probs = probs / probs.sum()
-
-        return probs
-
-    def _get_inning_probs(
-        self,
-        base_probs: np.ndarray,
-        inning: int,
-        bullpen_factor: float,
-        is_away: bool,
-    ) -> np.ndarray:
-        if inning < 7 or abs(bullpen_factor - 1.0) < 0.005:
-            return base_probs
-        probs = base_probs.copy()
-        if bullpen_factor > 1.0:
-            penalty = (bullpen_factor - 1.0) * 0.5
-            adjustment = min(0.05, penalty)
-            probs[4] *= (1 + adjustment * 0.5)  # HR
-            probs[1] *= (1 + adjustment * 0.3)  # single
-            probs[5] *= (1 + adjustment * 0.2)  # walk
-            probs[0] *= (1 - adjustment * 0.2)  # out
-        else:
-            boost = (1.0 - bullpen_factor) * 0.5
-            adjustment = min(0.05, boost)
-            probs[4] *= (1 - adjustment * 0.5)
-            probs[1] *= (1 - adjustment * 0.3)
-            probs[5] *= (1 - adjustment * 0.2)
-            probs[0] *= (1 + adjustment * 0.2)
-        probs = np.maximum(probs, 0.001)
-        return probs / probs.sum()
 
     def _sample_outcome(self, probs: np.ndarray) -> PAOutcome:
         outcomes = [
-            PAOutcome.OUT, PAOutcome.SINGLE, PAOutcome.DOUBLE,
-            PAOutcome.TRIPLE, PAOutcome.HOME_RUN, PAOutcome.WALK,
-            PAOutcome.HIT_BY_PITCH, PAOutcome.SACRIFICE,
+            PAOutcome.OUT,
+            PAOutcome.SINGLE,
+            PAOutcome.DOUBLE,
+            PAOutcome.TRIPLE,
+            PAOutcome.HOME_RUN,
+            PAOutcome.WALK,
+            PAOutcome.HIT_BY_PITCH,
+            PAOutcome.SACRIFICE,
         ]
         idx = self.rng.choice(len(outcomes), p=probs)
         return outcomes[idx]
@@ -667,31 +772,39 @@ class MonteCarloMLBSimulator:
             state.away_score += runs
 
     def _check_game_ended(self, state: GameState, is_walkoff_scenario: bool) -> bool:
-        if (state.half == "bot"
+        if (
+            state.half == "bot"
             and state.inning >= self.MAX_INNINGS
             and state.home_score > state.away_score
-            and state.outs < self.OUTS_PER_HALF):
+            and state.outs < self.OUTS_PER_HALF
+        ):
             state.is_final = True
             state.is_walkoff = True
             return True
 
-        if (state.half == "top"
+        if (
+            state.half == "top"
             and state.inning > self.MAX_INNINGS
             and state.away_score > state.home_score
-            and state.outs == self.OUTS_PER_HALF):
+            and state.outs == self.OUTS_PER_HALF
+        ):
             state.is_final = True
             return True
 
-        if (state.half == "top"
+        if (
+            state.half == "top"
             and state.inning > self.MAX_INNINGS
             and state.outs == self.OUTS_PER_HALF
-            and state.home_score > state.away_score):
+            and state.home_score > state.away_score
+        ):
             state.is_final = True
             return True
 
-        if (state.outs == self.OUTS_PER_HALF
+        if (
+            state.outs == self.OUTS_PER_HALF
             and state.inning > self.MAX_INNINGS
-            and state.home_score != state.away_score):
+            and state.home_score != state.away_score
+        ):
             state.is_final = True
             return True
 
@@ -707,50 +820,233 @@ class MonteCarloMLBSimulator:
 # ============================================================================
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     sim = MonteCarloMLBSimulator(seed=42)
 
     home_lineup = [
-        BatterState(player_id=1, name="Judge", bats="R", woba_vs_rhp=0.420, woba_vs_lhp=0.390, k_rate=0.280, bb_rate=0.180, hr_rate=0.065),
-        BatterState(player_id=2, name="Soto", bats="L", woba_vs_rhp=0.410, woba_vs_lhp=0.350, k_rate=0.180, bb_rate=0.190, hr_rate=0.045),
-        BatterState(player_id=3, name="Stanton", bats="R", woba_vs_rhp=0.350, woba_vs_lhp=0.330, k_rate=0.310, bb_rate=0.080, hr_rate=0.055),
-        BatterState(player_id=4, name="Rizzo", bats="L", woba_vs_rhp=0.340, woba_vs_lhp=0.300, k_rate=0.170, bb_rate=0.090, hr_rate=0.035),
-        BatterState(player_id=5, name="Torres", bats="R", woba_vs_rhp=0.330, woba_vs_lhp=0.320, k_rate=0.200, bb_rate=0.100, hr_rate=0.030),
-        BatterState(player_id=6, name="Volpe", bats="R", woba_vs_rhp=0.300, woba_vs_lhp=0.290, k_rate=0.270, bb_rate=0.070, hr_rate=0.020),
-        BatterState(player_id=7, name="Wells", bats="L", woba_vs_rhp=0.320, woba_vs_lhp=0.280, k_rate=0.220, bb_rate=0.100, hr_rate=0.025),
-        BatterState(player_id=8, name="Verdugo", bats="L", woba_vs_rhp=0.310, woba_vs_lhp=0.270, k_rate=0.160, bb_rate=0.080, hr_rate=0.020),
-        BatterState(player_id=9, name="Grisham", bats="L", woba_vs_rhp=0.290, woba_vs_lhp=0.250, k_rate=0.320, bb_rate=0.110, hr_rate=0.025),
+        BatterState(
+            player_id=1,
+            name="Judge",
+            bats="R",
+            woba_vs_rhp=0.420,
+            woba_vs_lhp=0.390,
+            k_rate=0.280,
+            bb_rate=0.180,
+            hr_rate=0.065,
+        ),
+        BatterState(
+            player_id=2,
+            name="Soto",
+            bats="L",
+            woba_vs_rhp=0.410,
+            woba_vs_lhp=0.350,
+            k_rate=0.180,
+            bb_rate=0.190,
+            hr_rate=0.045,
+        ),
+        BatterState(
+            player_id=3,
+            name="Stanton",
+            bats="R",
+            woba_vs_rhp=0.350,
+            woba_vs_lhp=0.330,
+            k_rate=0.310,
+            bb_rate=0.080,
+            hr_rate=0.055,
+        ),
+        BatterState(
+            player_id=4,
+            name="Rizzo",
+            bats="L",
+            woba_vs_rhp=0.340,
+            woba_vs_lhp=0.300,
+            k_rate=0.170,
+            bb_rate=0.090,
+            hr_rate=0.035,
+        ),
+        BatterState(
+            player_id=5,
+            name="Torres",
+            bats="R",
+            woba_vs_rhp=0.330,
+            woba_vs_lhp=0.320,
+            k_rate=0.200,
+            bb_rate=0.100,
+            hr_rate=0.030,
+        ),
+        BatterState(
+            player_id=6,
+            name="Volpe",
+            bats="R",
+            woba_vs_rhp=0.300,
+            woba_vs_lhp=0.290,
+            k_rate=0.270,
+            bb_rate=0.070,
+            hr_rate=0.020,
+        ),
+        BatterState(
+            player_id=7,
+            name="Wells",
+            bats="L",
+            woba_vs_rhp=0.320,
+            woba_vs_lhp=0.280,
+            k_rate=0.220,
+            bb_rate=0.100,
+            hr_rate=0.025,
+        ),
+        BatterState(
+            player_id=8,
+            name="Verdugo",
+            bats="L",
+            woba_vs_rhp=0.310,
+            woba_vs_lhp=0.270,
+            k_rate=0.160,
+            bb_rate=0.080,
+            hr_rate=0.020,
+        ),
+        BatterState(
+            player_id=9,
+            name="Grisham",
+            bats="L",
+            woba_vs_rhp=0.290,
+            woba_vs_lhp=0.250,
+            k_rate=0.320,
+            bb_rate=0.110,
+            hr_rate=0.025,
+        ),
     ]
 
     away_lineup = [
-        BatterState(player_id=10, name="Acuna", bats="R", woba_vs_rhp=0.400, woba_vs_lhp=0.370, k_rate=0.230, bb_rate=0.130, hr_rate=0.050),
-        BatterState(player_id=11, name="Albies", bats="S", woba_vs_rhp=0.350, woba_vs_lhp=0.340, k_rate=0.190, bb_rate=0.080, hr_rate=0.035),
-        BatterState(player_id=12, name="Riley", bats="R", woba_vs_rhp=0.370, woba_vs_lhp=0.330, k_rate=0.250, bb_rate=0.090, hr_rate=0.050),
-        BatterState(player_id=13, name="Olson", bats="L", woba_vs_rhp=0.360, woba_vs_lhp=0.300, k_rate=0.240, bb_rate=0.110, hr_rate=0.055),
-        BatterState(player_id=14, name="Ozuna", bats="R", woba_vs_rhp=0.340, woba_vs_lhp=0.320, k_rate=0.220, bb_rate=0.100, hr_rate=0.045),
-        BatterState(player_id=15, name="Murphy", bats="R", woba_vs_rhp=0.320, woba_vs_lhp=0.300, k_rate=0.200, bb_rate=0.080, hr_rate=0.030),
-        BatterState(player_id=16, name="Arcia", bats="R", woba_vs_rhp=0.300, woba_vs_lhp=0.290, k_rate=0.210, bb_rate=0.060, hr_rate=0.020),
-        BatterState(player_id=17, name="Harris", bats="L", woba_vs_rhp=0.330, woba_vs_lhp=0.280, k_rate=0.240, bb_rate=0.060, hr_rate=0.030),
-        BatterState(player_id=18, name="Rosario", bats="L", woba_vs_rhp=0.290, woba_vs_lhp=0.250, k_rate=0.260, bb_rate=0.050, hr_rate=0.020),
+        BatterState(
+            player_id=10,
+            name="Acuna",
+            bats="R",
+            woba_vs_rhp=0.400,
+            woba_vs_lhp=0.370,
+            k_rate=0.230,
+            bb_rate=0.130,
+            hr_rate=0.050,
+        ),
+        BatterState(
+            player_id=11,
+            name="Albies",
+            bats="S",
+            woba_vs_rhp=0.350,
+            woba_vs_lhp=0.340,
+            k_rate=0.190,
+            bb_rate=0.080,
+            hr_rate=0.035,
+        ),
+        BatterState(
+            player_id=12,
+            name="Riley",
+            bats="R",
+            woba_vs_rhp=0.370,
+            woba_vs_lhp=0.330,
+            k_rate=0.250,
+            bb_rate=0.090,
+            hr_rate=0.050,
+        ),
+        BatterState(
+            player_id=13,
+            name="Olson",
+            bats="L",
+            woba_vs_rhp=0.360,
+            woba_vs_lhp=0.300,
+            k_rate=0.240,
+            bb_rate=0.110,
+            hr_rate=0.055,
+        ),
+        BatterState(
+            player_id=14,
+            name="Ozuna",
+            bats="R",
+            woba_vs_rhp=0.340,
+            woba_vs_lhp=0.320,
+            k_rate=0.220,
+            bb_rate=0.100,
+            hr_rate=0.045,
+        ),
+        BatterState(
+            player_id=15,
+            name="Murphy",
+            bats="R",
+            woba_vs_rhp=0.320,
+            woba_vs_lhp=0.300,
+            k_rate=0.200,
+            bb_rate=0.080,
+            hr_rate=0.030,
+        ),
+        BatterState(
+            player_id=16,
+            name="Arcia",
+            bats="R",
+            woba_vs_rhp=0.300,
+            woba_vs_lhp=0.290,
+            k_rate=0.210,
+            bb_rate=0.060,
+            hr_rate=0.020,
+        ),
+        BatterState(
+            player_id=17,
+            name="Harris",
+            bats="L",
+            woba_vs_rhp=0.330,
+            woba_vs_lhp=0.280,
+            k_rate=0.240,
+            bb_rate=0.060,
+            hr_rate=0.030,
+        ),
+        BatterState(
+            player_id=18,
+            name="Rosario",
+            bats="L",
+            woba_vs_rhp=0.290,
+            woba_vs_lhp=0.250,
+            k_rate=0.260,
+            bb_rate=0.050,
+            hr_rate=0.020,
+        ),
     ]
 
     home_pitcher = PitcherState(
-        player_id=100, name="Cole", throws="R",
-        k_rate=0.280, bb_rate=0.070, hr_rate=0.028,
-        whiff_pct=0.130, avg_velo=96.0, avg_spin=2500.0,
+        player_id=100,
+        name="Cole",
+        throws="R",
+        k_rate=0.280,
+        bb_rate=0.070,
+        hr_rate=0.028,
+        whiff_pct=0.130,
+        avg_velo=96.0,
+        avg_spin=2500.0,
+        k_per_9_30d=9.5,
+        bb_per_9_30d=2.5,
+        hr_per_9_30d=1.1,
+        fip_30d=3.20,
+        avg_velo_30d=96.0,
+        whiff_pct_30d=28.0,
     )
     away_pitcher = PitcherState(
-        player_id=101, name="Strider", throws="R",
-        k_rate=0.350, bb_rate=0.080, hr_rate=0.025,
-        whiff_pct=0.170, avg_velo=98.0, avg_spin=2400.0,
+        player_id=101,
+        name="Strider",
+        throws="R",
+        k_rate=0.350,
+        bb_rate=0.080,
+        hr_rate=0.025,
+        whiff_pct=0.170,
+        avg_velo=98.0,
+        avg_spin=2400.0,
+        k_per_9_30d=12.0,
+        bb_per_9_30d=2.8,
+        hr_per_9_30d=1.0,
+        fip_30d=2.80,
+        avg_velo_30d=98.0,
+        whiff_pct_30d=32.0,
     )
 
     def progress(current, total):
-        logger.info(f"Progress: {current}/{total} ({(current/total)*100:.0f}%)")
+        logger.info(f"Progress: {current}/{total} ({(current / total) * 100:.0f}%)")
 
     result = sim.run_simulation(
         home_lineup=home_lineup,
@@ -760,15 +1056,23 @@ if __name__ == "__main__":
         park_factor_hr=1.04,
         park_factor_single=1.01,
         park_factor_k=0.98,
+        stadium_id=3313,
+        umpire_id=423205,
+        home_bullpen_fip_30d=3.85,
+        away_bullpen_fip_30d=3.95,
+        temperature_f=72.0,
+        wind_speed=8.0,
+        wind_direction="OUT",
+        umpire_cs_rate=0.63,
         n_iterations=10000,
         progress_callback=progress,
     )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"RESULTADOS DE SIMULACION MONTE CARLO (10,000 iteraciones)")
-    print(f"{'='*60}")
-    print(f"P(Local)  = {result.home_win_prob:.3f}  ({result.home_win_prob*100:.1f}%)")
-    print(f"P(Visit.) = {result.away_win_prob:.3f}  ({result.away_win_prob*100:.1f}%)")
+    print(f"{'=' * 60}")
+    print(f"P(Local)  = {result.home_win_prob:.3f}  ({result.home_win_prob * 100:.1f}%)")
+    print(f"P(Visit.) = {result.away_win_prob:.3f}  ({result.away_win_prob * 100:.1f}%)")
     print(f"Carreras esperadas: Local={result.mean_home_runs:.2f} (+-{result.std_home_runs:.2f})")
     print(f"                     Visit.={result.mean_away_runs:.2f} (+-{result.std_away_runs:.2f})")
     print(f"P(Extra innings) = {result.extra_innings_prob:.3f}")
@@ -783,6 +1087,6 @@ if __name__ == "__main__":
     print(f"  EV(Local)  = {ev['home_ev']:.4f}")
     print(f"  EV(Visit.) = {ev['away_ev']:.4f}")
     print(f"  Recomendacion: {ev['recommendation']}")
-    if ev['recommendation'] != 'no_bet':
+    if ev["recommendation"] != "no_bet":
         print(f"  Kelly frac = {ev['kelly_fraction']:.4f}")
         print(f"  Apuesta EV+ detectada! Valor: {ev['expected_value']:.4f}")

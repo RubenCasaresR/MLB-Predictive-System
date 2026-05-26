@@ -33,12 +33,11 @@ help:
 # Installation
 # ---------------------------------------------------------------------------
 install:
-	$(PIP) install -r requirements.txt
 	$(PIP) install -e .
 
 lint:
-	flake8 --max-line-length=100 --exclude=venv,.git,__pycache__ .
-	pylint --disable=C0111,C0103,C0301 --ignore=venv,__pycache__ .
+	ruff check .
+	ruff format --check .
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -56,7 +55,7 @@ run:
 	$(PYTHON) -m uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 
 run-worker:
-	$(PYTHON) -m etl.orchestrator --loop
+	$(PYTHON) run.py loop
 
 # ---------------------------------------------------------------------------
 # Docker

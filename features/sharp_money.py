@@ -13,12 +13,13 @@
 # pero la línea se mueve a favor del equipo B -> RLM.
 # =============================================================================
 
-from typing import Dict, List, Optional, Tuple
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-import pandas as pd
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
-import logging
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,10 @@ class SharpMoneySignal:
 
 class SharpMoneyDetector:
     # Umbrales de detección calibrados en datos históricos
-    DISCREPANCY_THRESHOLD = 0.12    # 12% de diferencia Ticket% vs Money%
-    RLM_TICKET_THRESHOLD = 0.55     # 55%+ del público en un lado
+    DISCREPANCY_THRESHOLD = 0.12  # 12% de diferencia Ticket% vs Money%
+    RLM_TICKET_THRESHOLD = 0.55  # 55%+ del público en un lado
     MIN_CONFIDENCE = 0.60
-    MIN_LINE_MOVEMENT = 5           # centavos mínimos de movimiento
+    MIN_LINE_MOVEMENT = 5  # centavos mínimos de movimiento
 
     def __init__(self):
         logger.info("SharpMoneyDetector initialized")
@@ -62,7 +63,7 @@ class SharpMoneyDetector:
         money_pct_team: float,
         line_open_team: int,
         line_current_team: int,
-    ) -> Optional[SharpMoneySignal]:
+    ) -> SharpMoneySignal | None:
 
         # ticket_pct_team: % de boletos que apuestan al equipo
         # money_pct_team: % de dinero que apuesta al equipo
@@ -130,7 +131,7 @@ class SharpMoneyDetector:
         home_money_pct: float,
         home_line_open: int,
         home_line_current: int,
-    ) -> List[SharpMoneySignal]:
+    ) -> list[SharpMoneySignal]:
 
         signals = []
 
@@ -188,18 +189,20 @@ class SharpMoneyDetector:
                 home_line_current=row.get("home_moneyline_close", 0),
             )
             for sig in signals:
-                results.append({
-                    "game_id": sig.game_id,
-                    "team_id": sig.team_id,
-                    "opponent_id": sig.opponent_id,
-                    "sportsbook": sig.sportsbook,
-                    "timestamp": sig.timestamp,
-                    "signal_type": sig.signal_type,
-                    "confidence": sig.confidence,
-                    "discrepancy": sig.discrepancy,
-                    "line_movement": sig.line_movement,
-                    "is_actionable": sig.is_actionable,
-                })
+                results.append(
+                    {
+                        "game_id": sig.game_id,
+                        "team_id": sig.team_id,
+                        "opponent_id": sig.opponent_id,
+                        "sportsbook": sig.sportsbook,
+                        "timestamp": sig.timestamp,
+                        "signal_type": sig.signal_type,
+                        "confidence": sig.confidence,
+                        "discrepancy": sig.discrepancy,
+                        "line_movement": sig.line_movement,
+                        "is_actionable": sig.is_actionable,
+                    }
+                )
 
         return pd.DataFrame(results)
 

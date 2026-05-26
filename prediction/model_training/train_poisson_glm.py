@@ -11,18 +11,19 @@
 #   - Completamente al inicio de cada temporada
 # =============================================================================
 
+import json
+import logging
 import os
 import pickle
-import json
-from typing import Dict, List, Optional, Tuple
 from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 from scipy.stats import poisson
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sqlalchemy import create_engine, text
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,7 @@ class PoissonGLMTrainer:
         os.makedirs(models_dir, exist_ok=True)
         logger.info(f"PoissonGLMTrainer initialized (models_dir={models_dir})")
 
-    def load_training_data(
-        self, seasons: List[int] = [2022, 2023, 2024]
-    ) -> pd.DataFrame:
+    def load_training_data(self, seasons: list[int] = [2022, 2023, 2024]) -> pd.DataFrame:
         logger.info(f"Loading training data for seasons {seasons}")
         season_list = ", ".join(str(s) for s in seasons)
 
@@ -66,16 +65,18 @@ class PoissonGLMTrainer:
         logger.info(f"Loaded {len(df)} training samples")
         return df
 
-    def extract_strikeout_features(
-        self, df: pd.DataFrame
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        agg = df.groupby(["pitcher_id", "game_date"]).agg(
-            avg_velo=("velo", "mean"),
-            avg_spin=("spin", "mean"),
-            whiff_rate=("whiff", "mean"),
-            k_count=("is_k", "sum"),
-            total_pitches=("is_k", "count"),
-        ).reset_index()
+    def extract_strikeout_features(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        agg = (
+            df.groupby(["pitcher_id", "game_date"])
+            .agg(
+                avg_velo=("velo", "mean"),
+                avg_spin=("spin", "mean"),
+                whiff_rate=("whiff", "mean"),
+                k_count=("is_k", "sum"),
+                total_pitches=("is_k", "count"),
+            )
+            .reset_index()
+        )
 
         agg["k_per_game"] = agg["k_count"]
         agg["velo_centered"] = agg["avg_velo"] - 93.0
@@ -86,15 +87,11 @@ class PoissonGLMTrainer:
 
         return features, targets
 
-    def train_strikeout_model(
-        self, seasons: List[int] = [2022, 2023, 2024]
-    ) -> Dict:
+    def train_strikeout_model(self, seasons: list[int] = [2022, 2023, 2024]) -> dict:
         df = self.load_training_data(seasons)
         X, y = self.extract_strikeout_features(df)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
         X_train = np.column_stack([np.ones(X_train.shape[0]), X_train])
         X_test = np.column_stack([np.ones(X_test.shape[0]), X_test])
@@ -145,13 +142,10 @@ class PoissonGLMTrainer:
         with open(path, "w") as f:
             json.dump(model, f, indent=2)
 
-        logger.info(
-            f"Strikeout model trained: R²={r2:.4f}, MAE={mae:.4f}, "
-            f"saved to {path}"
-        )
+        logger.info(f"Strikeout model trained: R²={r2:.4f}, MAE={mae:.4f}, saved to {path}")
         return model
 
-    def evaluate_model(self, model_path: str, test_data: Optional[pd.DataFrame] = None):
+    def evaluate_model(self, model_path: str, test_data: pd.DataFrame | None = None):
         with open(model_path) as f:
             model = json.load(f)
 

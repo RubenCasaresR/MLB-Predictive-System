@@ -14,13 +14,14 @@
 # en un intervalo fijo (9 entradas = ~40-45 outs).
 # =============================================================================
 
-import math
 import json
-import pickle
-from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass, asdict
-import numpy as np
 import logging
+import math
+import pickle
+from dataclasses import asdict, dataclass
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +30,23 @@ logger = logging.getLogger(__name__)
 # ESTRUCTURAS DE DATOS
 # ============================================================================
 
+
 @dataclass
 class PoissonModel:
     intercept: float
-    coefficients: Dict[str, float]
-    feature_names: List[str]
+    coefficients: dict[str, float]
+    feature_names: list[str]
     r_squared: float = 0.0
     training_samples: int = 0
 
-    def predict_log_lambda(self, features: Dict[str, float]) -> float:
+    def predict_log_lambda(self, features: dict[str, float]) -> float:
         log_lambda = self.intercept
         for name in self.feature_names:
             if name in features:
                 log_lambda += self.coefficients.get(name, 0.0) * features[name]
         return log_lambda
 
-    def predict(self, features: Dict[str, float]) -> float:
+    def predict(self, features: dict[str, float]) -> float:
         return math.exp(self.predict_log_lambda(features))
 
 
@@ -70,10 +72,21 @@ class StrikeoutModel(PoissonModel):
                 "precipitation_pct": -0.100,
             },
             feature_names=[
-                "avg_velo", "whiff_pct", "opponent_k_pct", "park_k_factor",
-                "days_rested", "avg_spin", "pitch_count_l30", "swing_pct",
-                "o_contact_pct", "home_plate_ump_cs_rate", "is_away",
-                "is_division_game", "month", "temperature", "precipitation_pct",
+                "avg_velo",
+                "whiff_pct",
+                "opponent_k_pct",
+                "park_k_factor",
+                "days_rested",
+                "avg_spin",
+                "pitch_count_l30",
+                "swing_pct",
+                "o_contact_pct",
+                "home_plate_ump_cs_rate",
+                "is_away",
+                "is_division_game",
+                "month",
+                "temperature",
+                "precipitation_pct",
             ],
             r_squared=0.42,
             training_samples=45000,
@@ -96,9 +109,15 @@ class HitModel(PoissonModel):
                 "launch_angle_avg": -0.003,
             },
             feature_names=[
-                "woba", "hard_hit_pct", "barrel_pct", "opponent_fip",
-                "park_hit_factor", "platoon_advantage", "k_rate",
-                "bb_rate", "launch_angle_avg",
+                "woba",
+                "hard_hit_pct",
+                "barrel_pct",
+                "opponent_fip",
+                "park_hit_factor",
+                "platoon_advantage",
+                "k_rate",
+                "bb_rate",
+                "launch_angle_avg",
             ],
             r_squared=0.35,
             training_samples=38000,
@@ -127,6 +146,7 @@ class PropBetResult:
 # MOTOR DE PROPS
 # ============================================================================
 
+
 class PoissonPropsEngine:
     def __init__(self):
         self.models = {
@@ -136,15 +156,13 @@ class PoissonPropsEngine:
         self.league_avg_k_pct = 0.225
         self.league_avg_bb_pct = 0.085
         self.league_avg_fip = 4.20
-        logger.info(
-            f"PoissonPropsEngine initialized with {len(self.models)} models"
-        )
+        logger.info(f"PoissonPropsEngine initialized with {len(self.models)} models")
 
     def predict(
         self,
         prop_type: str,
-        features: Dict[str, float],
-    ) -> Tuple[float, float]:
+        features: dict[str, float],
+    ) -> tuple[float, float]:
 
         model = self.models.get(prop_type)
         if model is None:
@@ -161,7 +179,7 @@ class PoissonPropsEngine:
         line_value: float,
         over_odds: int,
         under_odds: int,
-        features: Dict[str, float],
+        features: dict[str, float],
     ) -> PropBetResult:
 
         lambda_pred, _ = self.predict(prop_type, features)
@@ -221,7 +239,7 @@ class PoissonPropsEngine:
         month: int = 6,
         temperature: float = 72.0,
         precipitation_pct: float = 0.0,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
 
         return {
             "avg_velo": (pitcher_velo - 93.0),
@@ -252,7 +270,7 @@ class PoissonPropsEngine:
         k_rate: float = 0.220,
         bb_rate: float = 0.085,
         launch_angle_avg: float = 12.0,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
 
         return {
             "woba": (woba - 0.310) * 10,
@@ -268,6 +286,7 @@ class PoissonPropsEngine:
 
     def _poisson_cdf(self, k: float, lam: float) -> float:
         from scipy.stats import poisson
+
         return poisson.cdf(k, lam)
 
     def _american_to_implied(self, odds: int) -> float:
@@ -292,14 +311,13 @@ class PoissonPropsEngine:
 # ENTRENAMIENTO DEL MODELO
 # ============================================================================
 
+
 class PoissonModelTrainer:
     def __init__(self, db_connection_string: str = ""):
         self.conn_string = db_connection_string
         logger.info("PoissonModelTrainer initialized")
 
-    def train_strikeout_model(
-        self, seasons: List[int] = [2022, 2023, 2024]
-    ) -> StrikeoutModel:
+    def train_strikeout_model(self, seasons: list[int] = [2022, 2023, 2024]) -> StrikeoutModel:
         logger.info(f"Training strikeout model on seasons {seasons}")
         model = StrikeoutModel()
         model.training_samples = len(seasons) * 15000
@@ -323,10 +341,7 @@ class PoissonModelTrainer:
 # ============================================================================
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     engine = PoissonPropsEngine()
 

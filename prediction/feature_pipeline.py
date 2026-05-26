@@ -11,12 +11,13 @@
 #   - Materializa mv_game_features
 # =============================================================================
 
-from typing import List, Optional
-from datetime import date, timedelta
-from sqlalchemy import create_engine, text
-import pandas as pd
-import numpy as np
 import logging
+from datetime import date, timedelta
+from typing import List, Optional
+
+import numpy as np
+import pandas as pd
+from sqlalchemy import create_engine, text
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ class FeaturePipeline:
         logger.info(f"Computing player rolling stats for {target_date}")
         start_date = target_date - timedelta(days=30)
         with self.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO player_rolling_stats (
                     player_id, game_id, as_of_date,
                     woba_30d, fip_30d, k_per_9_30d, bb_per_9_30d, hr_per_9_30d,
@@ -84,7 +86,9 @@ class FeaturePipeline:
                     hr_per_9_30d = EXCLUDED.hr_per_9_30d,
                     avg_velo_30d = EXCLUDED.avg_velo_30d,
                     whiff_pct_30d = EXCLUDED.whiff_pct_30d
-                """), {"start": start_date, "end": target_date})
+                """),
+                {"start": start_date, "end": target_date},
+            )
 
         logger.info("Player rolling stats computed")
 
@@ -92,7 +96,8 @@ class FeaturePipeline:
         logger.info(f"Computing batter rolling stats for {target_date}")
         start_date = target_date - timedelta(days=30)
         with self.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO batter_rolling_stats (
                     player_id, game_id, as_of_date,
                     woba_30d, k_pct_30d, bb_pct_30d,
@@ -138,14 +143,17 @@ class FeaturePipeline:
                     hr_per_9_30d = EXCLUDED.hr_per_9_30d,
                     groundball_pct_30d = EXCLUDED.groundball_pct_30d,
                     flyball_pct_30d = EXCLUDED.flyball_pct_30d
-                """), {"start": start_date, "end": target_date})
+                """),
+                {"start": start_date, "end": target_date},
+            )
         logger.info("Batter rolling stats computed")
 
     def compute_team_rolling_stats(self, target_date: date):
         logger.info(f"Computing team rolling stats for {target_date}")
         start_date = target_date - timedelta(days=30)
         with self.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO team_rolling_stats (team_id, game_id, as_of_date, woba_30d)
                 SELECT
                     team_id, game_id, game_date,                     ROUND(CAST(AVG(woba) AS NUMERIC), 4)
@@ -179,9 +187,12 @@ class FeaturePipeline:
                 GROUP BY team_id, game_id, game_date
                 ON CONFLICT (team_id, game_id) DO UPDATE SET
                     woba_30d = EXCLUDED.woba_30d
-            """), {"start": start_date, "end": target_date})
+            """),
+                {"start": start_date, "end": target_date},
+            )
 
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO team_rolling_stats (team_id, game_id, as_of_date, bullpen_era_30d, bullpen_fip_30d)
                 WITH team_pitchers AS (
                     SELECT
@@ -241,14 +252,17 @@ class FeaturePipeline:
                 ON CONFLICT (team_id, game_id) DO UPDATE SET
                     bullpen_era_30d = EXCLUDED.bullpen_era_30d,
                     bullpen_fip_30d = EXCLUDED.bullpen_fip_30d
-            """), {"start": start_date, "end": target_date})
+            """),
+                {"start": start_date, "end": target_date},
+            )
         logger.info("Team rolling stats computed")
 
     def compute_fatigue_scores(self, target_date: date):
         logger.info(f"Computing fatigue scores for {target_date}")
         window_start = target_date - timedelta(days=30)
         with self.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 UPDATE player_rolling_stats
                 SET days_rested = sub.days_rested,
                     pitches_last_7d = sub.pitches_last_7d,
@@ -280,16 +294,19 @@ class FeaturePipeline:
                 ) sub
                 WHERE player_rolling_stats.player_id = sub.player_id
                   AND player_rolling_stats.game_id = sub.game_id
-            """), {
-                "week_start": target_date - timedelta(days=7),
-                "end": target_date,
-            })
+            """),
+                {
+                    "week_start": target_date - timedelta(days=7),
+                    "end": target_date,
+                },
+            )
         logger.info("Fatigue scores computed")
 
     def detect_sharp_money(self, target_date: date):
         logger.info(f"Detecting sharp money for {target_date}")
         with self.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 WITH lagged AS (
                     SELECT market_id,
                            LAG(home_moneyline_close) OVER (
@@ -311,7 +328,9 @@ class FeaturePipeline:
                 FROM lagged
                 WHERE market_lines.market_id = lagged.market_id
                   AND market_lines.recorded_at::date = :gd
-            """), {"gd": target_date})
+            """),
+                {"gd": target_date},
+            )
         logger.info("Sharp money flags updated")
 
     def refresh_materialized_view(self):
@@ -320,7 +339,7 @@ class FeaturePipeline:
             conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_game_features"))
         logger.info("Materialized view refreshed")
 
-    def run_full_pipeline(self, target_date: Optional[date] = None):
+    def run_full_pipeline(self, target_date: date | None = None):
         if target_date is None:
             target_date = date.today()
 
@@ -339,7 +358,8 @@ class FeaturePipeline:
             start = target_date - timedelta(days=window)
             col = f"woba_{window}d"
             with self.engine.begin() as conn:
-                conn.execute(text(f"""
+                conn.execute(
+                    text(f"""
                     UPDATE player_rolling_stats
                     SET {col} = sub.woba
                     FROM (
@@ -360,7 +380,9 @@ class FeaturePipeline:
                     ) sub
                     WHERE player_rolling_stats.player_id = sub.pitcher_id
                       AND player_rolling_stats.game_id = sub.game_id
-                """), {"start": start, "end": target_date})
+                """),
+                    {"start": start, "end": target_date},
+                )
 
 
 # ============================================================================
@@ -370,5 +392,6 @@ class FeaturePipeline:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     from etl.config import DATABASE_URL
+
     pipeline = FeaturePipeline(DATABASE_URL)
     pipeline.run_full_pipeline()

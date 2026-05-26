@@ -1,14 +1,19 @@
 """Tests para el simulador Monte Carlo."""
 
-import pytest
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from prediction.monte_carlo_simulator import (
-    MonteCarloMLBSimulator, BatterState, PitcherState, PAOutcome, GameState,
+    BatterState,
+    GameState,
+    MonteCarloMLBSimulator,
+    PAOutcome,
+    PitcherState,
 )
 
 
@@ -19,17 +24,17 @@ def sim():
 
 @pytest.fixture
 def sample_lineup():
-    return [
-        BatterState(player_id=i, name=f"B{i}", bats="R")
-        for i in range(9)
-    ]
+    return [BatterState(player_id=i, name=f"B{i}", bats="R") for i in range(9)]
 
 
 @pytest.fixture
 def sample_pitcher():
     return PitcherState(
-        player_id=100, name="P100", throws="R",
-        k_rate=0.25, bb_rate=0.08,
+        player_id=100,
+        name="P100",
+        throws="R",
+        k_rate=0.25,
+        bb_rate=0.08,
     )
 
 
@@ -38,25 +43,59 @@ class TestMonteCarloSimulator:
         assert sim.rng is not None
         assert sim.MAX_INNINGS == 9
 
-    def test_build_probs_sum_to_one(self, sim, sample_pitcher):
+    def test_predict_probs_sum_to_one(self, sim, sample_pitcher):
         batter = BatterState(player_id=1, name="Test", bats="R")
-        probs = sim._build_batter_probs(batter, sample_pitcher, 1.0, 1.0, 1.0)
+        fv = sim._build_feature_vector(
+            batter,
+            sample_pitcher,
+            inning=1,
+            outs_before=0,
+            half_inning="T",
+            stadium_id=0,
+            umpire_id=0,
+            park_hr=1.0,
+            park_k=1.0,
+            park_woba=1.0,
+            temperature=70.0,
+            wind_speed=0.0,
+            wind_direction="NONE",
+            umpire_cs_rate=0.63,
+            bullpen_fip_30d=4.50,
+            is_bullpen_active=0,
+        )
+        probs = sim._predict_probs(fv)
         assert np.isclose(probs.sum(), 1.0, atol=0.01)
 
-    def test_build_probs_all_positive(self, sim, sample_pitcher):
+    def test_predict_probs_all_positive(self, sim, sample_pitcher):
         batter = BatterState(player_id=1, name="Test", bats="L")
-        probs = sim._build_batter_probs(batter, sample_pitcher, 1.5, 1.1, 0.9)
+        fv = sim._build_feature_vector(
+            batter,
+            sample_pitcher,
+            inning=5,
+            outs_before=1,
+            half_inning="B",
+            stadium_id=3313,
+            umpire_id=423205,
+            park_hr=1.5,
+            park_k=0.9,
+            park_woba=1.1,
+            temperature=85.0,
+            wind_speed=10.0,
+            wind_direction="OUT",
+            umpire_cs_rate=0.63,
+            bullpen_fip_30d=4.50,
+            is_bullpen_active=0,
+        )
+        probs = sim._predict_probs(fv)
         assert (probs > 0).all()
 
-    def test_platoon_adjustment(self, sim, sample_pitcher):
-        same_side = sim._build_batter_probs(
-            BatterState(1, "LHH", "L"), sample_pitcher, 1.0, 1.0, 1.0
-        )
-        opp_side = sim._build_batter_probs(
-            BatterState(1, "RHH", "R"), sample_pitcher, 1.0, 1.0, 1.0
-        )
-        # Same side should have higher out probability
-        assert same_side[0] > opp_side[0] * 0.9
+    def test_has_platoon_advantage(self, sim):
+        assert sim._has_platoon_advantage("L", "R") == 1
+        assert sim._has_platoon_advantage("R", "L") == 1
+        assert sim._has_platoon_advantage("S", "R") == 1
+        assert sim._has_platoon_advantage("S", "L") == 1
+        assert sim._has_platoon_advantage("R", "R") == 0
+        assert sim._has_platoon_advantage("L", "L") == 0
 
     def test_simulation_runs(self, sim, sample_lineup, sample_pitcher):
         result = sim.run_simulation(
@@ -72,12 +111,10 @@ class TestMonteCarloSimulator:
 
     def test_home_advantage(self, sim, sample_pitcher):
         strong_lineup = [
-            BatterState(i, f"S{i}", "R", woba_vs_rhp=0.500, woba_vs_lhp=0.500)
-            for i in range(9)
+            BatterState(i, f"S{i}", "R", woba_vs_rhp=0.500, woba_vs_lhp=0.500) for i in range(9)
         ]
         weak_lineup = [
-            BatterState(i, f"W{i}", "R", woba_vs_rhp=0.200, woba_vs_lhp=0.200)
-            for i in range(9)
+            BatterState(i, f"W{i}", "R", woba_vs_rhp=0.200, woba_vs_lhp=0.200) for i in range(9)
         ]
         result = sim.run_simulation(
             home_lineup=strong_lineup,
@@ -124,29 +161,31 @@ class TestMonteCarloSimulator:
         sim1 = MonteCarloMLBSimulator(seed=12345)
         sim2 = MonteCarloMLBSimulator(seed=12345)
         r1 = sim1.run_simulation(
-            sample_lineup, sample_lineup, sample_pitcher, sample_pitcher,
+            sample_lineup,
+            sample_lineup,
+            sample_pitcher,
+            sample_pitcher,
             n_iterations=500,
         )
         r2 = sim2.run_simulation(
-            sample_lineup, sample_lineup, sample_pitcher, sample_pitcher,
+            sample_lineup,
+            sample_lineup,
+            sample_pitcher,
+            sample_pitcher,
             n_iterations=500,
         )
         assert np.allclose(r1.home_runs_array, r2.home_runs_array)
         assert np.allclose(r1.away_runs_array, r2.away_runs_array)
 
     def test_probabilities_near_extremes(self, sim, sample_pitcher):
-        elite = [
-            BatterState(i, f"E{i}", "R", woba_vs_rhp=0.480, k_rate=0.10)
-            for i in range(9)
-        ]
-        awful = [
-            BatterState(i, f"A{i}", "R", woba_vs_rhp=0.220, k_rate=0.35)
-            for i in range(9)
-        ]
+        elite = [BatterState(i, f"E{i}", "R", woba_vs_rhp=0.480, k_rate=0.10) for i in range(9)]
+        awful = [BatterState(i, f"A{i}", "R", woba_vs_rhp=0.220, k_rate=0.35) for i in range(9)]
         elite_pitcher = PitcherState(200, "Ace", "R", k_rate=0.35, bb_rate=0.04)
         result = sim.run_simulation(
-            home_lineup=elite, away_lineup=awful,
-            home_pitcher=elite_pitcher, away_pitcher=sample_pitcher,
+            home_lineup=elite,
+            away_lineup=awful,
+            home_pitcher=elite_pitcher,
+            away_pitcher=sample_pitcher,
             n_iterations=500,
         )
         assert result.home_win_prob > 0.5
@@ -181,27 +220,32 @@ class TestGameState:
 class TestEVCalculation:
     def test_american_to_implied_positive(self):
         from prediction.monte_carlo_simulator import SimulationResult
+
         p = SimulationResult.american_to_implied(+150)
         assert abs(p - 0.40) < 0.01
 
     def test_american_to_implied_negative(self):
         from prediction.monte_carlo_simulator import SimulationResult
+
         p = SimulationResult.american_to_implied(-130)
         assert abs(p - 0.565) < 0.01
 
     def test_implied_to_american_favorite(self):
         from prediction.monte_carlo_simulator import SimulationResult
+
         odds = SimulationResult.implied_to_american(0.60)
         assert odds < 0
         assert odds == -150
 
     def test_implied_to_american_dog(self):
         from prediction.monte_carlo_simulator import SimulationResult
+
         odds = SimulationResult.implied_to_american(0.40)
         assert odds > 0
         assert odds == +150
 
     def test_kelly_fraction_zero_for_no_edge(self):
         from prediction.monte_carlo_simulator import SimulationResult
+
         k = SimulationResult.kelly_fraction(None, 0.4, -110, 0.25)
         assert k >= 0

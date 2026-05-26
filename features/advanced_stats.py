@@ -12,11 +12,12 @@
 # escalares para flexibilidad en pipeline batch o streaming.
 # =============================================================================
 
-from typing import Union, Dict, Optional, List, Tuple
-import pandas as pd
-import numpy as np
-from enum import Enum
 import logging
+from enum import Enum
+from typing import Dict, List, Optional, Tuple, Union
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -72,17 +73,18 @@ LEAGUE_AVG_HR_PER_9 = 1.20
 # FUNCIONES wOBA
 # ============================================================================
 
+
 def calculate_woba(
-    walks: Union[int, pd.Series],
-    hit_by_pitch: Union[int, pd.Series],
-    singles: Union[int, pd.Series],
-    doubles: Union[int, pd.Series],
-    triples: Union[int, pd.Series],
-    home_runs: Union[int, pd.Series],
-    at_bats: Union[int, pd.Series],
-    sacrifice_flys: Optional[Union[int, pd.Series]] = None,
+    walks: int | pd.Series,
+    hit_by_pitch: int | pd.Series,
+    singles: int | pd.Series,
+    doubles: int | pd.Series,
+    triples: int | pd.Series,
+    home_runs: int | pd.Series,
+    at_bats: int | pd.Series,
+    sacrifice_flys: int | pd.Series | None = None,
     season: int = 2024,
-) -> Union[float, pd.Series]:
+) -> float | pd.Series:
     weights = WOBA_WEIGHTS.get(season, WOBA_WEIGHTS[2024])
     numerator = (
         weights["walk"] * walks
@@ -92,19 +94,17 @@ def calculate_woba(
         + weights["triple"] * triples
         + weights["home_run"] * home_runs
     )
-    denominator = (
-        at_bats + walks + hit_by_pitch + (sacrifice_flys or 0)
-    )
+    denominator = at_bats + walks + hit_by_pitch + (sacrifice_flys or 0)
     if isinstance(denominator, pd.Series):
         return numerator / denominator.replace(0, np.nan)
     return numerator / denominator if denominator > 0 else 0.0
 
 
 def calculate_woba_with_splits(
-    stats_vs_lhp: Dict[str, int],
-    stats_vs_rhp: Dict[str, int],
+    stats_vs_lhp: dict[str, int],
+    stats_vs_rhp: dict[str, int],
     season: int = 2024,
-) -> Dict[str, float]:
+) -> dict[str, float]:
 
     woba_vs_lhp = calculate_woba(**stats_vs_lhp, season=season)
     woba_vs_rhp = calculate_woba(**stats_vs_rhp, season=season)
@@ -112,10 +112,20 @@ def calculate_woba_with_splits(
         k: (stats_vs_lhp.get(k, 0) + stats_vs_rhp.get(k, 0))
         for k in set(stats_vs_lhp) | set(stats_vs_rhp)
     }
-    total_pa = combined.get("at_bats", 0) + combined.get("walks", 0) + combined.get("hit_by_pitch", 0)
+    total_pa = (
+        combined.get("at_bats", 0) + combined.get("walks", 0) + combined.get("hit_by_pitch", 0)
+    )
     if "walks" in stats_vs_lhp and "walks" in stats_vs_rhp:
-        lhp_pa = stats_vs_lhp.get("at_bats", 0) + stats_vs_lhp.get("walks", 0) + stats_vs_lhp.get("hit_by_pitch", 0)
-        rhp_pa = stats_vs_rhp.get("at_bats", 0) + stats_vs_rhp.get("walks", 0) + stats_vs_rhp.get("hit_by_pitch", 0)
+        lhp_pa = (
+            stats_vs_lhp.get("at_bats", 0)
+            + stats_vs_lhp.get("walks", 0)
+            + stats_vs_lhp.get("hit_by_pitch", 0)
+        )
+        rhp_pa = (
+            stats_vs_rhp.get("at_bats", 0)
+            + stats_vs_rhp.get("walks", 0)
+            + stats_vs_rhp.get("hit_by_pitch", 0)
+        )
     else:
         lhp_pa = rhp_pa = 0
 
@@ -128,22 +138,18 @@ def calculate_woba_with_splits(
 
 
 def calculate_xwoba(
-    launch_speed: Union[float, pd.Series],
-    launch_angle: Union[float, pd.Series],
-    sprint_speed: Optional[Union[float, pd.Series]] = None,
-) -> Union[float, pd.Series]:
+    launch_speed: float | pd.Series,
+    launch_angle: float | pd.Series,
+    sprint_speed: float | pd.Series | None = None,
+) -> float | pd.Series:
 
     if isinstance(launch_speed, pd.Series):
         xwoba = _xwoba_from_statcast(launch_speed.values, launch_angle.values)
         return pd.Series(xwoba, index=launch_speed.index)
-    return float(_xwoba_from_statcast(
-        np.array([launch_speed]), np.array([launch_angle])
-    )[0])
+    return float(_xwoba_from_statcast(np.array([launch_speed]), np.array([launch_angle]))[0])
 
 
-def _xwoba_from_statcast(
-    speeds: np.ndarray, angles: np.ndarray
-) -> np.ndarray:
+def _xwoba_from_statcast(speeds: np.ndarray, angles: np.ndarray) -> np.ndarray:
     # Modelo simplificado de xwOBA basado en velocidad y ángulo de salida
     # Basado en el modelo público de Statcast/Alex Chamberlain
     # Peso: 0.35 * speed_bucket + 0.50 * angle_bucket + 0.15 * interaction
@@ -164,15 +170,16 @@ def _xwoba_from_statcast(
 # FUNCIONES FIP
 # ============================================================================
 
+
 def calculate_fip(
-    strikeouts: Union[int, pd.Series],
-    walks: Union[int, pd.Series],
-    hit_by_pitch: Union[int, pd.Series],
-    home_runs: Union[int, pd.Series],
-    innings_pitched: Union[float, pd.Series],
-    use_custom_factor: Optional[float] = None,
+    strikeouts: int | pd.Series,
+    walks: int | pd.Series,
+    hit_by_pitch: int | pd.Series,
+    home_runs: int | pd.Series,
+    innings_pitched: float | pd.Series,
+    use_custom_factor: float | None = None,
     season: int = 2024,
-) -> Union[float, pd.Series]:
+) -> float | pd.Series:
 
     fip_constant = {
         2024: 3.10,
@@ -183,11 +190,7 @@ def calculate_fip(
     if use_custom_factor is not None:
         fip_constant = use_custom_factor
 
-    numerator = (
-        13 * home_runs
-        + 3 * (walks + hit_by_pitch)
-        - 2 * strikeouts
-    )
+    numerator = 13 * home_runs + 3 * (walks + hit_by_pitch) - 2 * strikeouts
 
     if isinstance(innings_pitched, pd.Series):
         result = numerator / innings_pitched + fip_constant
@@ -199,11 +202,11 @@ def calculate_fip(
 
 
 def calculate_xera(
-    fip: Union[float, pd.Series],
-    quality_of_contact: Optional[Union[float, pd.Series]] = None,
-    defense_rating: Optional[Union[float, pd.Series]] = None,
-    park_factor: Optional[Union[float, pd.Series]] = None,
-) -> Union[float, pd.Series]:
+    fip: float | pd.Series,
+    quality_of_contact: float | pd.Series | None = None,
+    defense_rating: float | pd.Series | None = None,
+    park_factor: float | pd.Series | None = None,
+) -> float | pd.Series:
 
     era = fip
     if quality_of_contact is not None:
@@ -216,16 +219,28 @@ def calculate_xera(
 
 
 def calculate_siera(
-    strikeouts: Union[int, pd.Series],
-    walks: Union[int, pd.Series],
-    ground_balls: Union[int, pd.Series],
-    fly_balls: Union[int, pd.Series],
-    innings_pitched: Union[float, pd.Series],
-) -> Union[float, pd.Series]:
+    strikeouts: int | pd.Series,
+    walks: int | pd.Series,
+    ground_balls: int | pd.Series,
+    fly_balls: int | pd.Series,
+    innings_pitched: float | pd.Series,
+) -> float | pd.Series:
 
-    k_rate = strikeouts / (innings_pitched * 3) if isinstance(strikeouts, (int, float)) else strikeouts / (innings_pitched * 3)
-    bb_rate = walks / (innings_pitched * 3) if isinstance(walks, (int, float)) else walks / (innings_pitched * 3)
-    gb_rate = ground_balls / (ground_balls + fly_balls) if isinstance(ground_balls, (int, float)) else ground_balls / (ground_balls + fly_balls)
+    k_rate = (
+        strikeouts / (innings_pitched * 3)
+        if isinstance(strikeouts, (int, float))
+        else strikeouts / (innings_pitched * 3)
+    )
+    bb_rate = (
+        walks / (innings_pitched * 3)
+        if isinstance(walks, (int, float))
+        else walks / (innings_pitched * 3)
+    )
+    gb_rate = (
+        ground_balls / (ground_balls + fly_balls)
+        if isinstance(ground_balls, (int, float))
+        else ground_balls / (ground_balls + fly_balls)
+    )
 
     siera = 6.0 - 5.0 * k_rate + 3.0 * bb_rate - 1.5 * gb_rate
     return siera
@@ -235,12 +250,13 @@ def calculate_siera(
 # CÁLCULO BATCH SOBRE DATAFRAMES (ROLLING WINDOWS)
 # ============================================================================
 
+
 def compute_rolling_stats(
     df: pd.DataFrame,
     player_col: str = "player_id",
     date_col: str = "game_date",
-    windows: List[int] = [7, 14, 30],
-    stats_to_compute: Optional[List[str]] = None,
+    windows: list[int] = [7, 14, 30],
+    stats_to_compute: list[str] | None = None,
 ) -> pd.DataFrame:
 
     if stats_to_compute is None:
@@ -269,29 +285,50 @@ def compute_woba_rolling(
     events_df: pd.DataFrame,
     player_col: str = "player_id",
     game_col: str = "game_id",
-    windows: List[int] = [7, 14, 30],
+    windows: list[int] = [7, 14, 30],
     season: int = 2024,
 ) -> pd.DataFrame:
 
     events = events_df.copy()
 
-    agg = events.groupby([player_col, game_col]).agg(
-        walks=("events", lambda x: (x == "walk").sum()),
-        hit_by_pitch=("events", lambda x: (x == "hit_by_pitch").sum()),
-        singles=("events", lambda x: (x == "single").sum()),
-        doubles=("events", lambda x: (x == "double").sum()),
-        triples=("events", lambda x: (x == "triple").sum()),
-        home_runs=("events", lambda x: (x == "home_run").sum()),
-        at_bats=("events", lambda x: x.isin([
-            "single", "double", "triple", "home_run", "out", "strikeout",
-            "fielders_choice", "double_play", "triple_play",
-        ]).sum()),
-    ).reset_index()
+    agg = (
+        events.groupby([player_col, game_col])
+        .agg(
+            walks=("events", lambda x: (x == "walk").sum()),
+            hit_by_pitch=("events", lambda x: (x == "hit_by_pitch").sum()),
+            singles=("events", lambda x: (x == "single").sum()),
+            doubles=("events", lambda x: (x == "double").sum()),
+            triples=("events", lambda x: (x == "triple").sum()),
+            home_runs=("events", lambda x: (x == "home_run").sum()),
+            at_bats=(
+                "events",
+                lambda x: x.isin(
+                    [
+                        "single",
+                        "double",
+                        "triple",
+                        "home_run",
+                        "out",
+                        "strikeout",
+                        "fielders_choice",
+                        "double_play",
+                        "triple_play",
+                    ]
+                ).sum(),
+            ),
+        )
+        .reset_index()
+    )
 
     agg["woba"] = calculate_woba(
-        agg["walks"], agg["hit_by_pitch"], agg["singles"],
-        agg["doubles"], agg["triples"], agg["home_runs"],
-        agg["at_bats"], season=season,
+        agg["walks"],
+        agg["hit_by_pitch"],
+        agg["singles"],
+        agg["doubles"],
+        agg["triples"],
+        agg["home_runs"],
+        agg["at_bats"],
+        season=season,
     )
 
     for window in windows:
@@ -305,6 +342,7 @@ def compute_woba_rolling(
 # ============================================================================
 # UTILIDAD
 # ============================================================================
+
 
 def fip_constant_for_season(season: int) -> float:
     return {
@@ -332,15 +370,25 @@ if __name__ == "__main__":
     print("=== MLB Advanced Stats Calculator ===\n")
 
     woba = calculate_woba(
-        walks=85, hit_by_pitch=12,
-        singles=100, doubles=35, triples=2, home_runs=40,
-        at_bats=500, sacrifice_flys=8, season=2024,
+        walks=85,
+        hit_by_pitch=12,
+        singles=100,
+        doubles=35,
+        triples=2,
+        home_runs=40,
+        at_bats=500,
+        sacrifice_flys=8,
+        season=2024,
     )
     print(f"wOBA: {woba:.3f}")
 
     fip = calculate_fip(
-        strikeouts=220, walks=50, hit_by_pitch=8,
-        home_runs=25, innings_pitched=180.0, season=2024,
+        strikeouts=220,
+        walks=50,
+        hit_by_pitch=8,
+        home_runs=25,
+        innings_pitched=180.0,
+        season=2024,
     )
     print(f"FIP: {fip:.2f}")
 
@@ -348,22 +396,34 @@ if __name__ == "__main__":
     print(f"xERA: {xera:.2f}")
 
     siera = calculate_siera(
-        strikeouts=220, walks=50,
-        ground_balls=180, fly_balls=120,
+        strikeouts=220,
+        walks=50,
+        ground_balls=180,
+        fly_balls=120,
         innings_pitched=180.0,
     )
     print(f"SIERA: {siera:.2f}")
 
     splits = calculate_woba_with_splits(
         stats_vs_lhp={
-            "walks": 20, "hit_by_pitch": 3,
-            "singles": 25, "doubles": 8, "triples": 0,
-            "home_runs": 8, "at_bats": 130, "sacrifice_flys": 2,
+            "walks": 20,
+            "hit_by_pitch": 3,
+            "singles": 25,
+            "doubles": 8,
+            "triples": 0,
+            "home_runs": 8,
+            "at_bats": 130,
+            "sacrifice_flys": 2,
         },
         stats_vs_rhp={
-            "walks": 65, "hit_by_pitch": 9,
-            "singles": 75, "doubles": 27, "triples": 2,
-            "home_runs": 32, "at_bats": 370, "sacrifice_flys": 6,
+            "walks": 65,
+            "hit_by_pitch": 9,
+            "singles": 75,
+            "doubles": 27,
+            "triples": 2,
+            "home_runs": 32,
+            "at_bats": 370,
+            "sacrifice_flys": 6,
         },
     )
     print(f"wOBA vs LHP: {splits['woba_vs_lhp']:.3f}")

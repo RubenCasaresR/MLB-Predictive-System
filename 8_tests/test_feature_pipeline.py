@@ -1,22 +1,26 @@
 """Tests para FeaturePipeline con SQLite (SQL refactorizado cross-platform)."""
 
-import pytest
-import sys, os
+import os
+import sys
 from datetime import date, timedelta
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sqlalchemy import create_engine, text
-from prediction.feature_pipeline import FeaturePipeline
 
+from prediction.feature_pipeline import FeaturePipeline
 
 # ============================================================================
 # Helpers: crear tablas y seed data
 # ============================================================================
 
+
 def _create_tables(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE games (
                 game_id TEXT PRIMARY KEY,
                 game_date TEXT NOT NULL,
@@ -28,8 +32,10 @@ def _create_tables(engine):
                 home_rest_days INTEGER DEFAULT 0,
                 away_rest_days INTEGER DEFAULT 0
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE players (
                 player_id INTEGER PRIMARY KEY,
                 full_name TEXT NOT NULL,
@@ -39,8 +45,10 @@ def _create_tables(engine):
                 throws TEXT CHECK (throws IN ('L', 'R')),
                 status TEXT DEFAULT 'ACTIVE'
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE at_bats (
                 ab_id INTEGER PRIMARY KEY,
                 game_id TEXT NOT NULL REFERENCES games(game_id),
@@ -51,8 +59,10 @@ def _create_tables(engine):
                 half_inning TEXT,
                 launch_angle REAL
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE pitches (
                 pitch_id INTEGER PRIMARY KEY,
                 ab_id INTEGER NOT NULL REFERENCES at_bats(ab_id),
@@ -60,8 +70,10 @@ def _create_tables(engine):
                 swing INTEGER DEFAULT 0,
                 whiff INTEGER DEFAULT 0
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE player_rolling_stats (
                 stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id INTEGER NOT NULL,
@@ -78,8 +90,10 @@ def _create_tables(engine):
                 fatigue_score REAL,
                 UNIQUE(player_id, game_id)
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE batter_rolling_stats (
                 stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id INTEGER NOT NULL,
@@ -93,8 +107,10 @@ def _create_tables(engine):
                 flyball_pct_30d REAL,
                 UNIQUE(player_id, game_id)
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE team_rolling_stats (
                 stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 team_id TEXT NOT NULL,
@@ -103,34 +119,40 @@ def _create_tables(engine):
                 woba_30d REAL,
                 UNIQUE(team_id, game_id)
             )
-        """))
+        """)
+        )
 
 
 def _seed_games(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT INTO games (game_id, game_date, home_team_id, away_team_id, status,
                                home_rest_days, away_rest_days)
             VALUES ('2026-05-19-NYY-BOS', '2026-05-19', 'BOS', 'NYY', 'FINAL', 1, 1)
-        """))
+        """)
+        )
 
 
 def _seed_at_bats(engine):
     with engine.begin() as conn:
         # Pitcher 100: 2 ABs, events: single, home_run
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT INTO at_bats (ab_id, game_id, pitcher_id, batter_id, events, inning, half_inning)
             VALUES
                 (1, '2026-05-19-NYY-BOS', 100, 1, 'single', 1, 'T'),
                 (2, '2026-05-19-NYY-BOS', 100, 2, 'home_run', 2, 'T'),
                 (3, '2026-05-19-NYY-BOS', 200, 3, 'strikeout', 1, 'B'),
                 (4, '2026-05-19-NYY-BOS', 200, 4, 'walk', 2, 'B')
-        """))
+        """)
+        )
 
 
 def _seed_players(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT INTO players (player_id, full_name, team_id, bats, throws)
             VALUES
                 (1, 'Batter_1', 'BOS', 'R', 'R'),
@@ -139,12 +161,14 @@ def _seed_players(engine):
                 (4, 'Batter_4', 'NYY', 'R', 'R'),
                 (100, 'Pitcher_100', 'BOS', 'R', 'R'),
                 (200, 'Pitcher_200', 'NYY', 'R', 'R')
-        """))
+        """)
+        )
 
 
 def _seed_pitches(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT INTO pitches (pitch_id, ab_id, release_speed, swing, whiff)
             VALUES
                 -- Pitcher 100 (2 ABs x 3 pitches each)
@@ -159,12 +183,14 @@ def _seed_pitches(engine):
                 (8, 3, 92.2, 1, 0),
                 (9, 4, 90.5, 0, 0),
                 (10, 4, 89.8, 1, 0)
-        """))
+        """)
+        )
 
 
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def pipeline():
@@ -179,6 +205,7 @@ def pipeline():
     fp.engine = engine
     return fp
 
+
 @pytest.fixture
 def pipeline_with_batter_angles():
     """Same as pipeline but with launch_angle data for batter stats."""
@@ -186,7 +213,8 @@ def pipeline_with_batter_angles():
     _create_tables(engine)
     _seed_games(engine)
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT INTO at_bats (ab_id, game_id, pitcher_id, batter_id, events, inning, half_inning, launch_angle)
             VALUES
                 (1, '2026-05-19-NYY-BOS', 100, 1, 'single', 1, 'T', 8.0),
@@ -195,7 +223,8 @@ def pipeline_with_batter_angles():
                 (4, '2026-05-19-NYY-BOS', 200, 4, 'walk', 2, 'B', NULL),
                 (5, '2026-05-19-NYY-BOS', 100, 1, 'field_out', 3, 'T', 5.0),
                 (6, '2026-05-19-NYY-BOS', 100, 2, 'flyout', 4, 'T', 40.0)
-        """))
+        """)
+        )
     _seed_pitches(engine)
     _seed_players(engine)
     fp = FeaturePipeline.__new__(FeaturePipeline)
@@ -207,6 +236,7 @@ def pipeline_with_batter_angles():
 # ============================================================================
 # Tests
 # ============================================================================
+
 
 class TestComputePlayerRollingStats:
     def test_inserts_stats_for_final_games(self, pipeline):
@@ -282,18 +312,24 @@ class TestComputePlayerRollingStats:
 
     def test_skip_non_final_games(self, pipeline):
         with pipeline.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO games (game_id, game_date, home_team_id, away_team_id, status)
                 VALUES ('2026-05-20-LAD-SFG', '2026-05-20', 'SFG', 'LAD', 'SCHEDULED')
-            """))
-            conn.execute(text("""
+            """)
+            )
+            conn.execute(
+                text("""
                 INSERT INTO at_bats (ab_id, game_id, pitcher_id, batter_id, events, inning, half_inning)
                 VALUES (100, '2026-05-20-LAD-SFG', 300, 5, 'home_run', 1, 'T')
-            """))
+            """)
+            )
         pipeline.compute_player_rolling_stats(date(2026, 5, 20))
         with pipeline.engine.connect() as conn:
             row = conn.execute(
-                text("SELECT COUNT(*) FROM player_rolling_stats WHERE game_id = '2026-05-20-LAD-SFG'")
+                text(
+                    "SELECT COUNT(*) FROM player_rolling_stats WHERE game_id = '2026-05-20-LAD-SFG'"
+                )
             ).scalar()
         assert row == 0
 
@@ -372,7 +408,9 @@ class TestComputeBatterRollingStats:
         pipeline_with_batter_angles.compute_batter_rolling_stats(date(2026, 5, 19))
         with pipeline_with_batter_angles.engine.connect() as conn:
             row = conn.execute(
-                text("SELECT groundball_pct_30d, flyball_pct_30d FROM batter_rolling_stats WHERE player_id = 4")
+                text(
+                    "SELECT groundball_pct_30d, flyball_pct_30d FROM batter_rolling_stats WHERE player_id = 4"
+                )
             ).fetchone()
         # Batter 4: walk with NULL launch_angle → no batted balls → 0
         assert row is not None
@@ -381,10 +419,12 @@ class TestComputeBatterRollingStats:
 
     def test_upserts_on_conflict(self, pipeline_with_batter_angles):
         with pipeline_with_batter_angles.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO batter_rolling_stats (player_id, game_id, as_of_date, woba_30d)
                 VALUES (1, '2026-05-19-NYY-BOS', '2026-05-19', 0.999)
-            """))
+            """)
+            )
         pipeline_with_batter_angles.compute_batter_rolling_stats(date(2026, 5, 19))
         with pipeline_with_batter_angles.engine.connect() as conn:
             row = conn.execute(
@@ -397,10 +437,12 @@ class TestComputeBatterRollingStats:
 class TestComputeWobaWindows:
     def test_woba_7d(self, pipeline):
         with pipeline.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO player_rolling_stats (player_id, game_id, as_of_date)
                 VALUES (100, '2026-05-19-NYY-BOS', '2026-05-19')
-            """))
+            """)
+            )
         pipeline._compute_woba_windows(date(2026, 5, 19))
         with pipeline.engine.connect() as conn:
             row = conn.execute(
@@ -411,10 +453,12 @@ class TestComputeWobaWindows:
 
     def test_woba_14d(self, pipeline):
         with pipeline.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO player_rolling_stats (player_id, game_id, as_of_date)
                 VALUES (100, '2026-05-19-NYY-BOS', '2026-05-19')
-            """))
+            """)
+            )
         pipeline._compute_woba_windows(date(2026, 5, 19))
         with pipeline.engine.connect() as conn:
             row = conn.execute(
@@ -425,10 +469,12 @@ class TestComputeWobaWindows:
 
     def test_woba_window_out_of_range(self, pipeline):
         with pipeline.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO player_rolling_stats (player_id, game_id, as_of_date)
                 VALUES (100, '2026-05-19-NYY-BOS', '2026-05-19')
-            """))
+            """)
+            )
         # target_date far in the future — no games in window
         pipeline._compute_woba_windows(date(2026, 7, 1))
         with pipeline.engine.connect() as conn:
@@ -465,10 +511,12 @@ class TestComputeTeamRollingStats:
 class TestComputeFatigueScores:
     def test_updates_fatigue_fields(self, pipeline):
         with pipeline.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO player_rolling_stats (player_id, game_id, as_of_date)
                 VALUES (100, '2026-05-19-NYY-BOS', '2026-05-19')
-            """))
+            """)
+            )
         pipeline.compute_fatigue_scores(date(2026, 5, 19))
         with pipeline.engine.connect() as conn:
             row = conn.execute(
@@ -488,10 +536,12 @@ class TestComputeFatigueScores:
 class TestRunFullPipeline:
     def test_runs_all_steps_without_error(self, pipeline):
         with pipeline.engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO player_rolling_stats (player_id, game_id, as_of_date)
                 VALUES (100, '2026-05-19-NYY-BOS', '2026-05-19')
-            """))
+            """)
+            )
         # Should not raise — detect_sharp_money and refresh_materialized_view
         # are skipped because they use PG-specific features
         pipeline.compute_player_rolling_stats(date(2026, 5, 19))

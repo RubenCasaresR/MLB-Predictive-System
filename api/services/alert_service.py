@@ -5,23 +5,24 @@
 # =============================================================================
 
 import asyncio
-from typing import Dict, List, Optional, Callable
-from datetime import datetime, timedelta
 import logging
+from collections.abc import Callable
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
-from api.routers.alerts import send_sharp_money_alert, send_ev_alert
+from api.routers.alerts import send_ev_alert, send_sharp_money_alert
 
 logger = logging.getLogger(__name__)
 
 
 class AlertService:
     def __init__(self):
-        self.alert_history: List[Dict] = []
-        self.subscribers: List[Callable] = []
-        self.last_scan: Optional[datetime] = None
+        self.alert_history: list[dict] = []
+        self.subscribers: list[Callable] = []
+        self.last_scan: datetime | None = None
         logger.info("AlertService initialized")
 
-    async def scan_market_for_alerts(self, market_data: Dict):
+    async def scan_market_for_alerts(self, market_data: dict):
         from features.sharp_money import SharpMoneyDetector
 
         detector = SharpMoneyDetector()
@@ -71,7 +72,7 @@ class AlertService:
                     f"{signal.team_id} ({signal.confidence:.0%})"
                 )
 
-    async def scan_ev_alerts(self, simulation_results: List[Dict]):
+    async def scan_ev_alerts(self, simulation_results: list[dict]):
         from risk.ev_calculator import EVCalculator
 
         calc = EVCalculator()
@@ -101,9 +102,7 @@ class AlertService:
                     kelly=bet.kelly_fraction,
                 )
 
-    async def continuous_scan(
-        self, interval_seconds: int = 60, duration_minutes: int = 180
-    ):
+    async def continuous_scan(self, interval_seconds: int = 60, duration_minutes: int = 180):
         end_time = datetime.now() + timedelta(minutes=duration_minutes)
         logger.info(
             f"Starting continuous alert scan "
@@ -120,21 +119,14 @@ class AlertService:
 
             await asyncio.sleep(interval_seconds)
 
-    def get_recent_alerts(
-        self, min_confidence: float = 0.0, limit: int = 50
-    ) -> List[Dict]:
-        filtered = [
-            a for a in self.alert_history
-            if a["confidence"] >= min_confidence
-        ]
+    def get_recent_alerts(self, min_confidence: float = 0.0, limit: int = 50) -> list[dict]:
+        filtered = [a for a in self.alert_history if a["confidence"] >= min_confidence]
         return filtered[-limit:]
 
     def get_unread_count(self) -> int:
-        return len(
-            [a for a in self.alert_history if not a.get("is_read", False)]
-        )
+        return len([a for a in self.alert_history if not a.get("is_read", False)])
 
-    def mark_read(self, alert_id: Optional[int] = None):
+    def mark_read(self, alert_id: int | None = None):
         if alert_id is None:
             for a in self.alert_history:
                 a["is_read"] = True

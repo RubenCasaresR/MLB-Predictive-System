@@ -1,11 +1,11 @@
-import os
 import logging
 import math
+import os
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
-from zoneinfo import ZoneInfo
 
 from api.database import get_engine
 from api.models.sure_bet_models import SureBetRecommendation, SureBetsResponse
@@ -19,13 +19,15 @@ TIER_RIESGOSA = 40
 MAX_REASONS = 8
 
 
-def _vig_free_prob(over_odds: int, under_odds: int) -> Tuple[float, float]:
+def _vig_free_prob(over_odds: int, under_odds: int) -> tuple[float, float]:
     """Convierte odds americanos a probabilidades libres de vig."""
+
     def to_prob(odds):
         if odds > 0:
             return 100 / (odds + 100)
         else:
             return -odds / (-odds + 100)
+
     p_over = to_prob(over_odds)
     p_under = to_prob(under_odds)
     total = p_over + p_under
@@ -38,7 +40,6 @@ def _normal_cdf(x, mean, std):
 
 
 class SureBetService:
-
     def __init__(self):
         self.engine = get_engine()
         self.tz_name = os.getenv("TIMEZONE", "America/Mexico_City")
@@ -46,14 +47,19 @@ class SureBetService:
 
     def get_sure_bets(self) -> SureBetsResponse:
         games = self._get_upcoming_games()
-        all_recs: List[SureBetRecommendation] = []
+        all_recs: list[SureBetRecommendation] = []
 
         for game in games:
             gid = game["game_id"]
             sim = self._get_simulation(gid)
             market = self._get_market(gid)
-            pitchers = self._get_pitcher_data(gid, game["home_team_id"], game["away_team_id"],
-                                              game.get("home_pitcher_id"), game.get("away_pitcher_id"))
+            pitchers = self._get_pitcher_data(
+                gid,
+                game["home_team_id"],
+                game["away_team_id"],
+                game.get("home_pitcher_id"),
+                game.get("away_pitcher_id"),
+            )
             teams = self._get_team_data(game["home_team_id"], game["away_team_id"])
             weather = self._get_weather(gid)
 
@@ -78,11 +84,13 @@ class SureBetService:
 
         return result
 
-    def _get_upcoming_games(self) -> List[dict]:
+    def _get_upcoming_games(self) -> list[dict]:
         from datetime import date as d
+
         today = d.today().isoformat()
         with self.engine.connect() as conn:
-            rows = conn.execute(text("""
+            rows = conn.execute(
+                text("""
                 SELECT g.game_id, g.game_date, g.home_team_id, g.away_team_id,
                        g.home_probable_pitcher, g.away_probable_pitcher,
                        g.status, g.start_time_et,
@@ -94,13 +102,19 @@ class SureBetService:
                   AND (g.status IS NULL OR g.status NOT IN ('Final','FINAL','Postponed','Cancelled'))
                 ORDER BY g.start_time_et
                 LIMIT 15
-            """), {"today": today}).fetchall()
+            """),
+                {"today": today},
+            ).fetchall()
         return [
             {
-                "game_id": r[0], "game_date": str(r[1]) if r[1] else "",
-                "home_team_id": r[2] or "", "away_team_id": r[3] or "",
-                "home_pitcher_id": r[4], "away_pitcher_id": r[5],
-                "status": r[6] or "", "start_time": str(r[7]) if r[7] else "",
+                "game_id": r[0],
+                "game_date": str(r[1]) if r[1] else "",
+                "home_team_id": r[2] or "",
+                "away_team_id": r[3] or "",
+                "home_pitcher_id": r[4],
+                "away_pitcher_id": r[5],
+                "status": r[6] or "",
+                "start_time": str(r[7]) if r[7] else "",
                 "home_rest_days": r[8] if r[8] else 0,
                 "away_rest_days": r[9] if r[9] else 0,
                 "home_travel_miles": r[10] if r[10] else 0,
@@ -111,16 +125,19 @@ class SureBetService:
             for r in rows
         ]
 
-    def _get_simulation(self, game_id: str) -> Optional[dict]:
+    def _get_simulation(self, game_id: str) -> dict | None:
         with self.engine.connect() as conn:
-            row = conn.execute(text("""
+            row = conn.execute(
+                text("""
                 SELECT home_win_prob, away_win_prob,
                        mean_home_runs, mean_away_runs,
                        std_home_runs, std_away_runs,
                        extra_innings_prob, walkoff_prob, n_iterations
                 FROM simulation_results
                 WHERE game_id = :gid
-            """), {"gid": game_id}).fetchone()
+            """),
+                {"gid": game_id},
+            ).fetchone()
         if not row:
             return None
         return {
@@ -135,9 +152,10 @@ class SureBetService:
             "n_iterations": row[8] or 10000,
         }
 
-    def _get_market(self, game_id: str) -> Optional[dict]:
+    def _get_market(self, game_id: str) -> dict | None:
         with self.engine.connect() as conn:
-            row = conn.execute(text("""
+            row = conn.execute(
+                text("""
                 SELECT home_moneyline_close, away_moneyline_close,
                        total_close, total_over_odds_close, total_under_odds_close,
                        sharp_money_flag, rlm_flag
@@ -145,7 +163,9 @@ class SureBetService:
                 WHERE game_id = :gid
                 ORDER BY recorded_at DESC
                 LIMIT 1
-            """), {"gid": game_id}).fetchone()
+            """),
+                {"gid": game_id},
+            ).fetchone()
         if not row:
             return None
         return {
@@ -158,11 +178,14 @@ class SureBetService:
             "rlm_flag": bool(row[6]) if row[6] else False,
         }
 
-    def _get_pitcher_data(self, game_id: str, home_team: str, away_team: str,
-                          home_pitcher_id, away_pitcher_id) -> dict:
+    def _get_pitcher_data(
+        self, game_id: str, home_team: str, away_team: str, home_pitcher_id, away_pitcher_id
+    ) -> dict:
         result = {"home": {}, "away": {}}
-        for side, pid, team in [("home", home_pitcher_id, home_team),
-                                 ("away", away_pitcher_id, away_team)]:
+        for side, pid, team in [
+            ("home", home_pitcher_id, home_team),
+            ("away", away_pitcher_id, away_team),
+        ]:
             if not pid:
                 continue
             try:
@@ -171,13 +194,16 @@ class SureBetService:
                 result[side] = {"fatigue_score": None, "fip_30d": None, "avg_velo_30d": None}
                 continue
             with self.engine.connect() as conn:
-                row = conn.execute(text("""
+                row = conn.execute(
+                    text("""
                     SELECT fatigue_score, fip_30d, avg_velo_30d, k_per_9_30d
                     FROM player_rolling_stats
                     WHERE player_id = :pid
                     ORDER BY as_of_date DESC
                     LIMIT 1
-                """), {"pid": pid_int}).fetchone()
+                """),
+                    {"pid": pid_int},
+                ).fetchone()
             if row:
                 result[side] = {
                     "fatigue_score": float(row[0]) if row[0] else None,
@@ -191,13 +217,16 @@ class SureBetService:
         result = {"home": {}, "away": {}}
         for side, team in [("home", home_team), ("away", away_team)]:
             with self.engine.connect() as conn:
-                row = conn.execute(text("""
+                row = conn.execute(
+                    text("""
                     SELECT bullpen_era_30d, bullpen_fip_30d, record_last_10, run_diff_30d
                     FROM team_rolling_stats
                     WHERE team_id = :tid
                     ORDER BY as_of_date DESC
                     LIMIT 1
-                """), {"tid": team}).fetchone()
+                """),
+                    {"tid": team},
+                ).fetchone()
             if row:
                 result[side] = {
                     "bullpen_era_30d": float(row[0]) if row[0] else None,
@@ -207,15 +236,18 @@ class SureBetService:
                 }
         return result
 
-    def _get_weather(self, game_id: str) -> Optional[dict]:
+    def _get_weather(self, game_id: str) -> dict | None:
         with self.engine.connect() as conn:
-            row = conn.execute(text("""
+            row = conn.execute(
+                text("""
                 SELECT temperature, wind_speed, wind_direction, precipitation_pct, condition
                 FROM weather_hourly
                 WHERE game_id = :gid
                 ORDER BY forecast_hour
                 LIMIT 1
-            """), {"gid": game_id}).fetchone()
+            """),
+                {"gid": game_id},
+            ).fetchone()
         if not row:
             return None
         return {
@@ -227,59 +259,85 @@ class SureBetService:
         }
 
     def _score_edge(self, edge_pct: float) -> int:
-        if edge_pct >= 10: return 30
-        if edge_pct >= 7: return 25
-        if edge_pct >= 5: return 20
-        if edge_pct >= 3: return 10
+        if edge_pct >= 10:
+            return 30
+        if edge_pct >= 7:
+            return 25
+        if edge_pct >= 5:
+            return 20
+        if edge_pct >= 3:
+            return 10
         return 0
 
     def _score_sim_gap(self, gap_pct: float) -> int:
-        if gap_pct >= 30: return 15
-        if gap_pct >= 20: return 10
-        if gap_pct >= 10: return 5
+        if gap_pct >= 30:
+            return 15
+        if gap_pct >= 20:
+            return 10
+        if gap_pct >= 10:
+            return 5
         return 0
 
     def _score_sharp(self, sharp: bool, rlm: bool) -> int:
         s = 0
-        if sharp: s += 10
-        if rlm: s += 5
+        if sharp:
+            s += 10
+        if rlm:
+            s += 5
         return s
 
-    def _score_pitcher_adv(self, fat_rec: Optional[float], fat_opp: Optional[float]) -> int:
+    def _score_pitcher_adv(self, fat_rec: float | None, fat_opp: float | None) -> int:
         if fat_rec is None or fat_opp is None:
             return 0
         diff = fat_opp - fat_rec
-        if diff >= 0.20: return 15
-        if diff >= 0.10: return 10
-        if diff >= 0.05: return 5
+        if diff >= 0.20:
+            return 15
+        if diff >= 0.10:
+            return 10
+        if diff >= 0.05:
+            return 5
         return 0
 
-    def _score_bullpen(self, bull_rec: Optional[float], bull_opp: Optional[float]) -> int:
+    def _score_bullpen(self, bull_rec: float | None, bull_opp: float | None) -> int:
         if bull_rec is None or bull_opp is None:
             return 0
         diff = bull_opp - bull_rec
-        if diff >= 1.5: return 10
-        if diff >= 0.8: return 6
-        if diff >= 0.3: return 3
+        if diff >= 1.5:
+            return 10
+        if diff >= 0.8:
+            return 6
+        if diff >= 0.3:
+            return 3
         return 0
 
-    def _score_rest(self, rest_rec: int, rest_opp: int,
-                     tz_rec: int, tz_opp: int,
-                     travel_rec: int, travel_opp: int) -> int:
+    def _score_rest(
+        self,
+        rest_rec: int,
+        rest_opp: int,
+        tz_rec: int,
+        tz_opp: int,
+        travel_rec: int,
+        travel_opp: int,
+    ) -> int:
         s = 0
         rest_diff = rest_rec - rest_opp
-        if rest_diff >= 2: s += 5
-        elif rest_diff >= 1: s += 3
+        if rest_diff >= 2:
+            s += 5
+        elif rest_diff >= 1:
+            s += 3
 
         tz_diff = tz_opp - tz_rec
-        if tz_diff >= 2: s += 3
-        elif tz_diff >= 1: s += 2
+        if tz_diff >= 2:
+            s += 3
+        elif tz_diff >= 1:
+            s += 2
 
         travel_diff = travel_opp - travel_rec
-        if travel_diff >= 1000: s += 2
+        if travel_diff >= 1000:
+            s += 2
         return s
 
-    def _score_weather_ml(self, weather: Optional[dict]) -> int:
+    def _score_weather_ml(self, weather: dict | None) -> int:
         if not weather:
             return 0
         s = 0
@@ -294,7 +352,7 @@ class SureBetService:
             s += 1
         return s
 
-    def _score_weather_total(self, weather: Optional[dict], direction: str) -> int:
+    def _score_weather_total(self, weather: dict | None, direction: str) -> int:
         """direction: 'OVER' o 'UNDER'"""
         if not weather:
             return 0
@@ -329,7 +387,7 @@ class SureBetService:
 
         return s
 
-    def _score_pitching_total(self, pitchers: dict) -> Tuple[int, str]:
+    def _score_pitching_total(self, pitchers: dict) -> tuple[int, str]:
         """Retorna (score, direccion: 'OVER' o 'UNDER')"""
         fip_h = (pitchers.get("home", {}) or {}).get("fip_30d")
         fip_a = (pitchers.get("away", {}) or {}).get("fip_30d")
@@ -346,7 +404,7 @@ class SureBetService:
             return 3, "UNDER"
         return 0, "OVER"
 
-    def _score_sim_total(self, mean_total: float, line: float) -> Tuple[int, str, float]:
+    def _score_sim_total(self, mean_total: float, line: float) -> tuple[int, str, float]:
         """Retorna (score, direccion, gap_en_carreras)"""
         gap = mean_total - line
         abs_gap = abs(gap)
@@ -358,22 +416,39 @@ class SureBetService:
             return 8, "OVER" if gap > 0 else "UNDER", abs_gap
         return 0, "OVER", abs_gap
 
-    def _generate_ml_reasons(self, game: dict, team: str, opp: str, edge_pct: float,
-                              win_prob: float, market: dict, pitchers: dict, teams_data: dict,
-                              weather: Optional[dict]) -> List[str]:
+    def _generate_ml_reasons(
+        self,
+        game: dict,
+        team: str,
+        opp: str,
+        edge_pct: float,
+        win_prob: float,
+        market: dict,
+        pitchers: dict,
+        teams_data: dict,
+        weather: dict | None,
+    ) -> list[str]:
         reasons = []
         if edge_pct >= 5:
-            reasons.append(f"Edge del {edge_pct:.1f}% sobre la cuota real → valor positivo significativo")
+            reasons.append(
+                f"Edge del {edge_pct:.1f}% sobre la cuota real → valor positivo significativo"
+            )
         elif edge_pct >= 3:
             reasons.append(f"Edge del {edge_pct:.1f}% indica una leve ventaja sobre el mercado")
 
         if win_prob >= 65:
-            reasons.append(f"Modelo Monte Carlo: {team} gana el {win_prob:.0f}% de las simulaciones")
+            reasons.append(
+                f"Modelo Monte Carlo: {team} gana el {win_prob:.0f}% de las simulaciones"
+            )
         elif win_prob >= 55:
-            reasons.append(f"Modelo Monte Carlo: {team} gana el {win_prob:.0f}% de las simulaciones")
+            reasons.append(
+                f"Modelo Monte Carlo: {team} gana el {win_prob:.0f}% de las simulaciones"
+            )
 
         if market.get("sharp_money_flag"):
-            reasons.append(f"Dinero sharp (profesional) respalda esta apuesta → señal de valor oculto")
+            reasons.append(
+                f"Dinero sharp (profesional) respalda esta apuesta → señal de valor oculto"
+            )
         if market.get("rlm_flag"):
             reasons.append(f"RLM detectado: la línea se mueve en dirección contraria al público")
 
@@ -384,9 +459,13 @@ class SureBetService:
         if fat_rec is not None and fat_opp is not None:
             diff = fat_opp - fat_rec
             if diff >= 0.20:
-                reasons.append(f"Abridor de {team} descansado (fatiga {fat_rec:.2f}) vs {opp} muy fatigado ({fat_opp:.2f})")
+                reasons.append(
+                    f"Abridor de {team} descansado (fatiga {fat_rec:.2f}) vs {opp} muy fatigado ({fat_opp:.2f})"
+                )
             elif diff >= 0.10:
-                reasons.append(f"Ventaja en fatiga de abridores: {team} ({fat_rec:.2f}) vs {opp} ({fat_opp:.2f})")
+                reasons.append(
+                    f"Ventaja en fatiga de abridores: {team} ({fat_rec:.2f}) vs {opp} ({fat_opp:.2f})"
+                )
 
         fip_rec = pit_rec.get("fip_30d")
         fip_opp = pit_opp.get("fip_30d")
@@ -396,14 +475,18 @@ class SureBetService:
         velo_rec = pit_rec.get("avg_velo_30d")
         velo_opp = pit_opp.get("avg_velo_30d")
         if velo_rec is not None and velo_opp is not None and velo_rec > velo_opp:
-            reasons.append(f"Abridor de {team} promedia más velocidad ({velo_rec:.1f} mph vs {velo_opp:.1f})")
+            reasons.append(
+                f"Abridor de {team} promedia más velocidad ({velo_rec:.1f} mph vs {velo_opp:.1f})"
+            )
 
         bull_rec = (teams_data.get(team.lower(), {}) or {}).get("bullpen_era_30d")
         bull_opp = (teams_data.get(opp.lower(), {}) or {}).get("bullpen_era_30d")
         if bull_rec is not None and bull_opp is not None and bull_rec < bull_opp:
             diff = bull_opp - bull_rec
             if diff >= 1.0:
-                reasons.append(f"Bullpen de {team} significativamente mejor (ERA {bull_rec:.2f} vs {bull_opp:.2f})")
+                reasons.append(
+                    f"Bullpen de {team} significativamente mejor (ERA {bull_rec:.2f} vs {bull_opp:.2f})"
+                )
             else:
                 reasons.append(f"Bullpen de {team} superior (ERA {bull_rec:.2f} vs {bull_opp:.2f})")
 
@@ -430,28 +513,46 @@ class SureBetService:
             if precip is not None and precip < 20:
                 parts.append("sin lluvia")
             if parts:
-                reasons.append(f"Clima: {' · '.join(parts)} → condiciones neutrales" if precip is None or precip < 20 else f"Clima: {' · '.join(parts)}")
+                reasons.append(
+                    f"Clima: {' · '.join(parts)} → condiciones neutrales"
+                    if precip is None or precip < 20
+                    else f"Clima: {' · '.join(parts)}"
+                )
 
         return reasons[:MAX_REASONS]
 
-    def _generate_total_reasons(self, game: dict, direction: str, market: dict,
-                                 edge_pct: float, mean_total: float, line: float,
-                                 pitchers: dict, weather: Optional[dict]) -> List[str]:
+    def _generate_total_reasons(
+        self,
+        game: dict,
+        direction: str,
+        market: dict,
+        edge_pct: float,
+        mean_total: float,
+        line: float,
+        pitchers: dict,
+        weather: dict | None,
+    ) -> list[str]:
         reasons = []
         if edge_pct >= 5:
-            reasons.append(f"Edge del {edge_pct:.1f}% sobre la línea de {line} → valor significativo")
+            reasons.append(
+                f"Edge del {edge_pct:.1f}% sobre la línea de {line} → valor significativo"
+            )
         elif edge_pct >= 3:
             reasons.append(f"Edge del {edge_pct:.1f}% sobre la línea de {line}")
 
         gap = mean_total - line
         label = "supera" if gap > 0 else "está por debajo de"
-        reasons.append(f"El modelo proyecta {mean_total:.1f} carreras totales ({label} la línea de {line})")
+        reasons.append(
+            f"El modelo proyecta {mean_total:.1f} carreras totales ({label} la línea de {line})"
+        )
 
         if direction == "OVER":
             wind_dir = (weather.get("wind_direction") or "").upper() if weather else ""
             wind = weather.get("wind_speed", 0) if weather else 0
             if wind_dir in ("OUT", "LTR", "RTL") and wind >= 10:
-                reasons.append(f"Viento de {wind:.0f} mph hacia fuera del estadio → favorece carreras")
+                reasons.append(
+                    f"Viento de {wind:.0f} mph hacia fuera del estadio → favorece carreras"
+                )
             temp = weather.get("temperature") if weather else None
             if temp is not None and temp >= 85:
                 reasons.append(f"Temperatura alta ({temp:.0f}°F) → el bateo se beneficia")
@@ -459,7 +560,9 @@ class SureBetService:
             wind_dir = (weather.get("wind_direction") or "").upper() if weather else ""
             wind = weather.get("wind_speed", 0) if weather else 0
             if wind_dir == "IN" and wind >= 10:
-                reasons.append(f"Viento de {wind:.0f} mph hacia dentro del estadio → limita las carreras")
+                reasons.append(
+                    f"Viento de {wind:.0f} mph hacia dentro del estadio → limita las carreras"
+                )
             temp = weather.get("temperature") if weather else None
             if temp is not None and temp <= 50:
                 reasons.append(f"Temperatura baja ({temp:.0f}°F) → el bateo se perjudica")
@@ -469,18 +572,28 @@ class SureBetService:
         if fip_h is not None and fip_a is not None:
             avg_fip = (fip_h + fip_a) / 2
             if direction == "OVER" and avg_fip >= 4.0:
-                reasons.append(f"Abridores con FIP combinado alto ({avg_fip:.2f}) → más carreras esperadas")
+                reasons.append(
+                    f"Abridores con FIP combinado alto ({avg_fip:.2f}) → más carreras esperadas"
+                )
             elif direction == "UNDER" and avg_fip <= 3.5:
-                reasons.append(f"Abridores con FIP combinado bajo ({avg_fip:.2f}) → menos carreras esperadas")
+                reasons.append(
+                    f"Abridores con FIP combinado bajo ({avg_fip:.2f}) → menos carreras esperadas"
+                )
 
         if market.get("sharp_money_flag"):
             reasons.append(f"Dinero sharp respalda esta señal en el mercado de totales")
 
         return reasons[:MAX_REASONS]
 
-    def _evaluate_moneyline(self, game: dict, sim: dict, market: dict,
-                            pitchers: dict, teams_data: dict,
-                            weather: Optional[dict]) -> List[SureBetRecommendation]:
+    def _evaluate_moneyline(
+        self,
+        game: dict,
+        sim: dict,
+        market: dict,
+        pitchers: dict,
+        teams_data: dict,
+        weather: dict | None,
+    ) -> list[SureBetRecommendation]:
         recs = []
         home = game["home_team_id"]
         away = game["away_team_id"]
@@ -515,12 +628,14 @@ class SureBetService:
             pit_rec = pitchers.get(team.lower(), {})
             pit_opp = pitchers.get(opp.lower(), {})
             score += self._score_pitcher_adv(
-                pit_rec.get("fatigue_score"), pit_opp.get("fatigue_score"))
+                pit_rec.get("fatigue_score"), pit_opp.get("fatigue_score")
+            )
 
             td_rec = teams_data.get(team.lower(), {})
             td_opp = teams_data.get(opp.lower(), {})
             score += self._score_bullpen(
-                td_rec.get("bullpen_era_30d"), td_opp.get("bullpen_era_30d"))
+                td_rec.get("bullpen_era_30d"), td_opp.get("bullpen_era_30d")
+            )
 
             rest_rec = game.get(f"{team.lower()}_rest_days", 0)
             rest_opp = game.get(f"{opp.lower()}_rest_days", 0)
@@ -532,12 +647,19 @@ class SureBetService:
 
             score += self._score_weather_ml(weather)
 
-            reasons = self._generate_ml_reasons(game, team, opp, edge_pct, win_prob,
-                                                 market, pitchers, teams_data, weather)
+            reasons = self._generate_ml_reasons(
+                game, team, opp, edge_pct, win_prob, market, pitchers, teams_data, weather
+            )
 
-            label = "Muy Segura" if score >= TIER_MUY_SEGURA else \
-                    "Segura" if score >= TIER_SEGURA else \
-                    "Riesgosa" if score >= TIER_RIESGOSA else ""
+            label = (
+                "Muy Segura"
+                if score >= TIER_MUY_SEGURA
+                else "Segura"
+                if score >= TIER_SEGURA
+                else "Riesgosa"
+                if score >= TIER_RIESGOSA
+                else ""
+            )
 
             stats = {
                 "edge_pct": round(edge_pct, 1),
@@ -556,27 +678,35 @@ class SureBetService:
                 "rest_days_opp": rest_opp,
             }
 
-            recs.append(SureBetRecommendation(
-                rank=0,
-                game_id=game["game_id"],
-                home_team=home,
-                away_team=away,
-                recommended_team=team,
-                market_type="moneyline",
-                odds=odds,
-                safety_score=score,
-                safety_label=label,
-                edge_pct=round(edge_pct, 1),
-                win_prob=round(win_prob, 1),
-                reasons=reasons,
-                key_stats=stats,
-            ))
+            recs.append(
+                SureBetRecommendation(
+                    rank=0,
+                    game_id=game["game_id"],
+                    home_team=home,
+                    away_team=away,
+                    recommended_team=team,
+                    market_type="moneyline",
+                    odds=odds,
+                    safety_score=score,
+                    safety_label=label,
+                    edge_pct=round(edge_pct, 1),
+                    win_prob=round(win_prob, 1),
+                    reasons=reasons,
+                    key_stats=stats,
+                )
+            )
 
         return recs
 
-    def _evaluate_totals(self, game: dict, sim: dict, market: dict,
-                          pitchers: dict, teams_data: dict,
-                          weather: Optional[dict]) -> List[SureBetRecommendation]:
+    def _evaluate_totals(
+        self,
+        game: dict,
+        sim: dict,
+        market: dict,
+        pitchers: dict,
+        teams_data: dict,
+        weather: dict | None,
+    ) -> list[SureBetRecommendation]:
         recs = []
         line = market.get("total_close")
         over_odds = market.get("total_over_odds")
@@ -589,7 +719,7 @@ class SureBetService:
         std_home = sim.get("std_home_runs", 0.1)
         std_away = sim.get("std_away_runs", 0.1)
         mean_total = mean_home + mean_away
-        std_total = math.sqrt(std_home ** 2 + std_away ** 2)
+        std_total = math.sqrt(std_home**2 + std_away**2)
 
         if std_total < 0.01:
             std_total = 0.01
@@ -627,12 +757,19 @@ class SureBetService:
             if sharp:
                 score += 5
 
-            reasons = self._generate_total_reasons(game, direction, market, edge_pct,
-                                                    mean_total, line, pitchers, weather)
+            reasons = self._generate_total_reasons(
+                game, direction, market, edge_pct, mean_total, line, pitchers, weather
+            )
 
-            label = "Muy Segura" if score >= TIER_MUY_SEGURA else \
-                    "Segura" if score >= TIER_SEGURA else \
-                    "Riesgosa" if score >= TIER_RIESGOSA else ""
+            label = (
+                "Muy Segura"
+                if score >= TIER_MUY_SEGURA
+                else "Segura"
+                if score >= TIER_SEGURA
+                else "Riesgosa"
+                if score >= TIER_RIESGOSA
+                else ""
+            )
 
             stats = {
                 "edge_pct": round(edge_pct, 1),
@@ -648,20 +785,22 @@ class SureBetService:
                 "temperature": (weather or {}).get("temperature"),
             }
 
-            recs.append(SureBetRecommendation(
-                rank=0,
-                game_id=game["game_id"],
-                home_team=game["home_team_id"],
-                away_team=game["away_team_id"],
-                recommended_team=None,
-                market_type=f"{direction}_{line}",
-                odds=odds,
-                safety_score=score,
-                safety_label=label,
-                edge_pct=round(edge_pct, 1),
-                win_prob=None,
-                reasons=reasons,
-                key_stats=stats,
-            ))
+            recs.append(
+                SureBetRecommendation(
+                    rank=0,
+                    game_id=game["game_id"],
+                    home_team=game["home_team_id"],
+                    away_team=game["away_team_id"],
+                    recommended_team=None,
+                    market_type=f"{direction}_{line}",
+                    odds=odds,
+                    safety_score=score,
+                    safety_label=label,
+                    edge_pct=round(edge_pct, 1),
+                    win_prob=None,
+                    reasons=reasons,
+                    key_stats=stats,
+                )
+            )
 
         return recs

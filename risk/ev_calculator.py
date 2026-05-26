@@ -14,11 +14,12 @@
 #   4. Tamaño de apuesta dentro del bankroll disponible
 # =============================================================================
 
-from typing import Dict, List, Optional, Tuple
+import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
-import math
-import logging
+from typing import Dict, List, Optional, Tuple
+
 from risk.kelly_criterion import KellyCriterion, KellyVariant
 
 logger = logging.getLogger(__name__)
@@ -79,9 +80,11 @@ class EVCalculator:
             return int(round((100 * (1 - prob)) / prob))
 
     def compute_edge(
-        self, real_prob: float, odds: int,
-        total_implied: Optional[float] = None,
-    ) -> Tuple[float, float]:
+        self,
+        real_prob: float,
+        odds: int,
+        total_implied: float | None = None,
+    ) -> tuple[float, float]:
 
         implied_raw = self.american_to_implied(odds)
         implied = implied_raw / total_implied if total_implied else implied_raw
@@ -99,7 +102,7 @@ class EVCalculator:
         home_real_prob: float,
         away_real_prob: float,
         sportsbook: str = "DraftKings",
-    ) -> List[EVBet]:
+    ) -> list[EVBet]:
 
         bets = []
 
@@ -117,30 +120,46 @@ class EVCalculator:
         if home_edge >= self.DEFAULT_EV_THRESHOLD:
             kelly = self._kelly(home_real_prob, home_odds)
             stake = self._calculate_stake(kelly)
-            bets.append(EVBet(
-                game_id=game_id, team=home_team, opponent=away_team,
-                sportsbook=sportsbook, market_type="MONEYLINE",
-                odds=home_odds, real_prob=round(home_real_prob, 4),
-                implied_prob=round(implied_home_adj, 4),
-                edge=round(home_edge, 4), kelly_fraction=round(kelly, 4),
-                recommended_stake=round(stake, 2),
-                timestamp=datetime.now(), confidence=min(1.0, home_edge * 20),
-                is_actionable=True,
-            ))
+            bets.append(
+                EVBet(
+                    game_id=game_id,
+                    team=home_team,
+                    opponent=away_team,
+                    sportsbook=sportsbook,
+                    market_type="MONEYLINE",
+                    odds=home_odds,
+                    real_prob=round(home_real_prob, 4),
+                    implied_prob=round(implied_home_adj, 4),
+                    edge=round(home_edge, 4),
+                    kelly_fraction=round(kelly, 4),
+                    recommended_stake=round(stake, 2),
+                    timestamp=datetime.now(),
+                    confidence=min(1.0, home_edge * 20),
+                    is_actionable=True,
+                )
+            )
 
         if away_edge >= self.DEFAULT_EV_THRESHOLD:
             kelly = self._kelly(away_real_prob, away_odds)
             stake = self._calculate_stake(kelly)
-            bets.append(EVBet(
-                game_id=game_id, team=away_team, opponent=home_team,
-                sportsbook=sportsbook, market_type="MONEYLINE",
-                odds=away_odds, real_prob=round(away_real_prob, 4),
-                implied_prob=round(implied_away_adj, 4),
-                edge=round(away_edge, 4), kelly_fraction=round(kelly, 4),
-                recommended_stake=round(stake, 2),
-                timestamp=datetime.now(), confidence=min(1.0, away_edge * 20),
-                is_actionable=True,
-            ))
+            bets.append(
+                EVBet(
+                    game_id=game_id,
+                    team=away_team,
+                    opponent=home_team,
+                    sportsbook=sportsbook,
+                    market_type="MONEYLINE",
+                    odds=away_odds,
+                    real_prob=round(away_real_prob, 4),
+                    implied_prob=round(implied_away_adj, 4),
+                    edge=round(away_edge, 4),
+                    kelly_fraction=round(kelly, 4),
+                    recommended_stake=round(stake, 2),
+                    timestamp=datetime.now(),
+                    confidence=min(1.0, away_edge * 20),
+                    is_actionable=True,
+                )
+            )
 
         return bets
 
@@ -153,7 +172,7 @@ class EVCalculator:
         odds: int,
         real_prob_cover: float,
         sportsbook: str = "DraftKings",
-    ) -> Optional[EVBet]:
+    ) -> EVBet | None:
 
         edge, implied = self.compute_edge(real_prob_cover, odds)
 
@@ -161,13 +180,19 @@ class EVCalculator:
             kelly = self._kelly(real_prob_cover, odds)
             stake = self._calculate_stake(kelly)
             return EVBet(
-                game_id=game_id, team=team, opponent=opponent,
-                sportsbook=sportsbook, market_type=f"RUN_LINE_{run_line:+.1f}",
-                odds=odds, real_prob=round(real_prob_cover, 4),
+                game_id=game_id,
+                team=team,
+                opponent=opponent,
+                sportsbook=sportsbook,
+                market_type=f"RUN_LINE_{run_line:+.1f}",
+                odds=odds,
+                real_prob=round(real_prob_cover, 4),
                 implied_prob=round(implied, 4),
-                edge=round(edge, 4), kelly_fraction=round(kelly, 4),
+                edge=round(edge, 4),
+                kelly_fraction=round(kelly, 4),
                 recommended_stake=round(stake, 2),
-                timestamp=datetime.now(), confidence=min(1.0, edge * 25),
+                timestamp=datetime.now(),
+                confidence=min(1.0, edge * 25),
                 is_actionable=True,
             )
         return None
@@ -183,7 +208,7 @@ class EVCalculator:
         prob_over: float,
         prob_under: float,
         sportsbook: str = "DraftKings",
-    ) -> List[EVBet]:
+    ) -> list[EVBet]:
 
         bets = []
 
@@ -199,30 +224,46 @@ class EVCalculator:
         if over_edge >= self.DEFAULT_EV_THRESHOLD:
             kelly = self._kelly(prob_over, over_odds)
             stake = self._calculate_stake(kelly)
-            bets.append(EVBet(
-                game_id=game_id, team=team, opponent=opponent,
-                sportsbook=sportsbook, market_type=f"OVER_{total}",
-                odds=over_odds, real_prob=round(prob_over, 4),
-                implied_prob=round(implied_over_adj, 4),
-                edge=round(over_edge, 4), kelly_fraction=round(kelly, 4),
-                recommended_stake=round(stake, 2),
-                timestamp=datetime.now(), confidence=min(1.0, over_edge * 20),
-                is_actionable=True,
-            ))
+            bets.append(
+                EVBet(
+                    game_id=game_id,
+                    team=team,
+                    opponent=opponent,
+                    sportsbook=sportsbook,
+                    market_type=f"OVER_{total}",
+                    odds=over_odds,
+                    real_prob=round(prob_over, 4),
+                    implied_prob=round(implied_over_adj, 4),
+                    edge=round(over_edge, 4),
+                    kelly_fraction=round(kelly, 4),
+                    recommended_stake=round(stake, 2),
+                    timestamp=datetime.now(),
+                    confidence=min(1.0, over_edge * 20),
+                    is_actionable=True,
+                )
+            )
 
         if under_edge >= self.DEFAULT_EV_THRESHOLD:
             kelly = self._kelly(prob_under, under_odds)
             stake = self._calculate_stake(kelly)
-            bets.append(EVBet(
-                game_id=game_id, team=team, opponent=opponent,
-                sportsbook=sportsbook, market_type=f"UNDER_{total}",
-                odds=under_odds, real_prob=round(prob_under, 4),
-                implied_prob=round(implied_under_adj, 4),
-                edge=round(under_edge, 4), kelly_fraction=round(kelly, 4),
-                recommended_stake=round(stake, 2),
-                timestamp=datetime.now(), confidence=min(1.0, under_edge * 20),
-                is_actionable=True,
-            ))
+            bets.append(
+                EVBet(
+                    game_id=game_id,
+                    team=team,
+                    opponent=opponent,
+                    sportsbook=sportsbook,
+                    market_type=f"UNDER_{total}",
+                    odds=under_odds,
+                    real_prob=round(prob_under, 4),
+                    implied_prob=round(implied_under_adj, 4),
+                    edge=round(under_edge, 4),
+                    kelly_fraction=round(kelly, 4),
+                    recommended_stake=round(stake, 2),
+                    timestamp=datetime.now(),
+                    confidence=min(1.0, under_edge * 20),
+                    is_actionable=True,
+                )
+            )
 
         return bets
 
@@ -237,7 +278,7 @@ class EVCalculator:
         prob_over: float,
         prob_under: float,
         sportsbook: str = "DraftKings",
-    ) -> List[EVBet]:
+    ) -> list[EVBet]:
 
         bets = []
 
@@ -256,30 +297,46 @@ class EVCalculator:
         if over_edge >= self.DEFAULT_EV_THRESHOLD:
             kelly = self._kelly(prob_over, over_odds)
             stake = self._calculate_stake(kelly)
-            bets.append(EVBet(
-                game_id=game_id, team=team, opponent="",
-                sportsbook=sportsbook, market_type=f"{market}_OVER",
-                odds=over_odds, real_prob=round(prob_over, 4),
-                implied_prob=round(implied_over_adj, 4),
-                edge=round(over_edge, 4), kelly_fraction=round(kelly, 4),
-                recommended_stake=round(stake, 2),
-                timestamp=datetime.now(), confidence=min(1.0, over_edge * 20),
-                is_actionable=True,
-            ))
+            bets.append(
+                EVBet(
+                    game_id=game_id,
+                    team=team,
+                    opponent="",
+                    sportsbook=sportsbook,
+                    market_type=f"{market}_OVER",
+                    odds=over_odds,
+                    real_prob=round(prob_over, 4),
+                    implied_prob=round(implied_over_adj, 4),
+                    edge=round(over_edge, 4),
+                    kelly_fraction=round(kelly, 4),
+                    recommended_stake=round(stake, 2),
+                    timestamp=datetime.now(),
+                    confidence=min(1.0, over_edge * 20),
+                    is_actionable=True,
+                )
+            )
 
         if under_edge >= self.DEFAULT_EV_THRESHOLD:
             kelly = self._kelly(prob_under, under_odds)
             stake = self._calculate_stake(kelly)
-            bets.append(EVBet(
-                game_id=game_id, team=team, opponent="",
-                sportsbook=sportsbook, market_type=f"{market}_UNDER",
-                odds=under_odds, real_prob=round(prob_under, 4),
-                implied_prob=round(implied_under_adj, 4),
-                edge=round(under_edge, 4), kelly_fraction=round(kelly, 4),
-                recommended_stake=round(stake, 2),
-                timestamp=datetime.now(), confidence=min(1.0, under_edge * 20),
-                is_actionable=True,
-            ))
+            bets.append(
+                EVBet(
+                    game_id=game_id,
+                    team=team,
+                    opponent="",
+                    sportsbook=sportsbook,
+                    market_type=f"{market}_UNDER",
+                    odds=under_odds,
+                    real_prob=round(prob_under, 4),
+                    implied_prob=round(implied_under_adj, 4),
+                    edge=round(under_edge, 4),
+                    kelly_fraction=round(kelly, 4),
+                    recommended_stake=round(stake, 2),
+                    timestamp=datetime.now(),
+                    confidence=min(1.0, under_edge * 20),
+                    is_actionable=True,
+                )
+            )
 
         return bets
 
@@ -290,9 +347,7 @@ class EVCalculator:
     def _calculate_stake(self, kelly_fraction: float) -> float:
         return self.bankroll * kelly_fraction
 
-    def filter_best_bets(
-        self, bets: List[EVBet], max_bets: int = 5
-    ) -> List[EVBet]:
+    def filter_best_bets(self, bets: list[EVBet], max_bets: int = 5) -> list[EVBet]:
         sorted_bets = sorted(
             [b for b in bets if b.is_actionable],
             key=lambda x: x.edge * x.confidence,
@@ -317,9 +372,12 @@ if __name__ == "__main__":
 
     bets = calc.evaluate_moneyline(
         game_id="2025-06-15-NYY-BOS",
-        home_team="NYY", away_team="BOS",
-        home_odds=-130, away_odds=+110,
-        home_real_prob=0.580, away_real_prob=0.420,
+        home_team="NYY",
+        away_team="BOS",
+        home_odds=-130,
+        away_odds=+110,
+        home_real_prob=0.580,
+        away_real_prob=0.420,
     )
 
     print("APUESTAS EV+ ENCONTRADAS:")

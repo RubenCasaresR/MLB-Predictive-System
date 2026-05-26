@@ -12,12 +12,13 @@
 #   - Poco descanso (short rest)
 # =============================================================================
 
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, date
-import pandas as pd
-import numpy as np
 import logging
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class FatigueScore:
     game_id: str
     game_date: date
     overall_fatigue: float  # 0.0 (descansado) a 1.0 (máxima fatiga)
-    components: Dict[str, float] = field(default_factory=dict)
+    components: dict[str, float] = field(default_factory=dict)
     rest_days: int = 0
     tz_crossings: int = 0
     travel_miles: int = 0
@@ -199,7 +200,7 @@ class FatigueDetector:
             is_high_risk=overall > 0.45,
         )
 
-    def query_travel_fatigue_sql(self, team_ids: List[str], game_date: date) -> str:
+    def query_travel_fatigue_sql(self, team_ids: list[str], game_date: date) -> str:
         team_list = ", ".join(f"'{t}'" for t in team_ids)
         return f"""
         WITH team_games AS (

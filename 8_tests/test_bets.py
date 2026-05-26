@@ -1,8 +1,10 @@
 """Tests para api/routers/bets.py (7 endpoints, 256 líneas)."""
 
+import os
+import sys
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
+
 import pytest
-import sys, os
-from unittest.mock import patch, MagicMock, ANY, AsyncMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -14,7 +16,8 @@ from api.app import app
 
 def _create_tables(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
@@ -22,8 +25,10 @@ def _create_tables(engine):
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 role TEXT DEFAULT 'user'
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS approved_bets (
                 bet_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT NOT NULL,
@@ -40,8 +45,10 @@ def _create_tables(engine):
                 user_id INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS bet_history (
                 bet_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT,
@@ -55,8 +62,10 @@ def _create_tables(engine):
                 edge REAL,
                 placed_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS simulation_results (
                 game_id TEXT PRIMARY KEY,
                 home_win_prob REAL,
@@ -71,25 +80,30 @@ def _create_tables(engine):
                 n_iterations INTEGER,
                 computed_at TEXT
             )
-        """))
+        """)
+        )
 
 
 def _seed_data(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO approved_bets
                 (game_id, team, opponent, sportsbook, market_type,
                  odds, edge, kelly_fraction, recommended_stake, confidence)
             VALUES
                 ('GAME-001', 'NYY', 'BOS', 'DraftKings', 'MONEYLINE',
                  -110, 0.05, 0.02, 200.0, 0.8)
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO bet_history
                 (bet_id, game_id, team, market_type, odds, stake, won, profit_loss, kelly_pct, edge)
             VALUES
                 (1, 'GAME-001', 'NYY', 'MONEYLINE', -110, 100.0, 1, 90.91, 0.02, 0.05)
-        """))
+        """)
+        )
         # Use exec_driver_sql on the Connection object (not raw DBAPI)
         # to avoid SQLAlchemy text() parsing JSON colons (:) as bind params
         conn.exec_driver_sql(
@@ -105,6 +119,7 @@ def _seed_data(engine):
 @pytest.fixture(autouse=True)
 def setup_db():
     import tempfile
+
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     db_url = f"sqlite:///{tmp.name}"
@@ -133,12 +148,20 @@ def _auth_header(client=None):
     """Register a test user and return Authorization header."""
     if client is None:
         client = TestClient(app)
-    client.post("/api/v1/auth/register", json={
-        "username": "testuser", "password": "testpass123",
-    })
-    token = client.post("/api/v1/auth/login", data={
-        "username": "testuser", "password": "testpass123",
-    }).json()["access_token"]
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "testuser",
+            "password": "testpass123",
+        },
+    )
+    token = client.post(
+        "/api/v1/auth/login",
+        data={
+            "username": "testuser",
+            "password": "testpass123",
+        },
+    ).json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -149,12 +172,19 @@ client = TestClient(app)
 # POST /api/v1/bets/ev
 # ============================================================================
 
+
 class TestCalculateEV:
     def test_requires_auth(self):
-        resp = client.post("/api/v1/bets/ev", json={
-            "game_id": "G1", "home_odds": -110, "away_odds": -110,
-            "home_real_prob": 0.55, "away_real_prob": 0.45,
-        })
+        resp = client.post(
+            "/api/v1/bets/ev",
+            json={
+                "game_id": "G1",
+                "home_odds": -110,
+                "away_odds": -110,
+                "home_real_prob": 0.55,
+                "away_real_prob": 0.45,
+            },
+        )
         assert resp.status_code == 401
 
     def test_returns_bets_with_token(self):
@@ -170,10 +200,17 @@ class TestCalculateEV:
 
         with patch("risk.ev_calculator.EVCalculator") as mock_cls:
             mock_cls.return_value.evaluate_moneyline.return_value = [mock_bet]
-            resp = client.post("/api/v1/bets/ev", json={
-                "game_id": "G1", "home_odds": -110, "away_odds": -110,
-                "home_real_prob": 0.55, "away_real_prob": 0.45,
-            }, headers=headers)
+            resp = client.post(
+                "/api/v1/bets/ev",
+                json={
+                    "game_id": "G1",
+                    "home_odds": -110,
+                    "away_odds": -110,
+                    "home_real_prob": 0.55,
+                    "away_real_prob": 0.45,
+                },
+                headers=headers,
+            )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -186,15 +223,26 @@ class TestCalculateEV:
         headers = _auth_header()
         with patch("risk.ev_calculator.EVCalculator") as mock_cls:
             mock_cls.return_value.evaluate_moneyline.return_value = []
-            client.post("/api/v1/bets/ev", json={
-                "game_id": "G-EV", "home_odds": -130, "away_odds": +110,
-                "home_real_prob": 0.60, "away_real_prob": 0.40,
-            }, headers=headers)
+            client.post(
+                "/api/v1/bets/ev",
+                json={
+                    "game_id": "G-EV",
+                    "home_odds": -130,
+                    "away_odds": +110,
+                    "home_real_prob": 0.60,
+                    "away_real_prob": 0.40,
+                },
+                headers=headers,
+            )
 
         mock_cls.return_value.evaluate_moneyline.assert_called_once_with(
-            game_id="G-EV", home_team="HOME", away_team="AWAY",
-            home_odds=-130, away_odds=+110,
-            home_real_prob=0.60, away_real_prob=0.40,
+            game_id="G-EV",
+            home_team="HOME",
+            away_team="AWAY",
+            home_odds=-130,
+            away_odds=+110,
+            home_real_prob=0.60,
+            away_real_prob=0.40,
         )
 
 
@@ -205,10 +253,15 @@ class TestCalculateEV:
 # ============================================================================
 
 MOCK_SIM_RESPONSE = {
-    "game_id": "G1", "home_win_prob": 0.58, "away_win_prob": 0.42,
-    "mean_home_runs": 4.5, "mean_away_runs": 3.8,
-    "std_home_runs": 2.1, "std_away_runs": 1.9,
-    "extra_innings_prob": 0.08, "walkoff_prob": 0.03,
+    "game_id": "G1",
+    "home_win_prob": 0.58,
+    "away_win_prob": 0.42,
+    "mean_home_runs": 4.5,
+    "mean_away_runs": 3.8,
+    "std_home_runs": 2.1,
+    "std_away_runs": 1.9,
+    "extra_innings_prob": 0.08,
+    "walkoff_prob": 0.03,
     "n_iterations": 10000,
     "home_run_distribution": {"0": 0.1},
     "away_run_distribution": {"0": 0.15},
@@ -218,10 +271,16 @@ MOCK_SIM_RESPONSE = {
 
 class TestRunSimulation:
     def test_requires_auth(self):
-        resp = client.post("/api/v1/bets/simulate", json={
-            "game_id": "G1", "home_team_id": "NYY", "away_team_id": "BOS",
-            "home_pitcher_id": 1, "away_pitcher_id": 2,
-        })
+        resp = client.post(
+            "/api/v1/bets/simulate",
+            json={
+                "game_id": "G1",
+                "home_team_id": "NYY",
+                "away_team_id": "BOS",
+                "home_pitcher_id": 1,
+                "away_pitcher_id": 2,
+            },
+        )
         assert resp.status_code == 401
 
     def test_returns_simulation_response(self):
@@ -231,10 +290,17 @@ class TestRunSimulation:
             mock_svc = mock_cls.return_value
             mock_svc.run_simulation = AsyncMock(return_value=MagicMock(**MOCK_SIM_RESPONSE))
 
-            resp = client.post("/api/v1/bets/simulate", json={
-                "game_id": "G1", "home_team_id": "NYY", "away_team_id": "BOS",
-                "home_pitcher_id": 1, "away_pitcher_id": 2,
-            }, headers=headers)
+            resp = client.post(
+                "/api/v1/bets/simulate",
+                json={
+                    "game_id": "G1",
+                    "home_team_id": "NYY",
+                    "away_team_id": "BOS",
+                    "home_pitcher_id": 1,
+                    "away_pitcher_id": 2,
+                },
+                headers=headers,
+            )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -247,10 +313,17 @@ class TestRunSimulation:
             mock_svc = mock_cls.return_value
             mock_svc.run_simulation = AsyncMock(return_value=MagicMock(**MOCK_SIM_RESPONSE))
 
-            client.post("/api/v1/bets/simulate", json={
-                "game_id": "G1", "home_team_id": "NYY", "away_team_id": "BOS",
-                "home_pitcher_id": 1, "away_pitcher_id": 2,
-            }, headers=headers)
+            client.post(
+                "/api/v1/bets/simulate",
+                json={
+                    "game_id": "G1",
+                    "home_team_id": "NYY",
+                    "away_team_id": "BOS",
+                    "home_pitcher_id": 1,
+                    "away_pitcher_id": 2,
+                },
+                headers=headers,
+            )
 
             args, _ = mock_svc.run_simulation.call_args
             assert args[0].game_id == "G1"
@@ -260,13 +333,20 @@ class TestRunSimulation:
 # POST /api/v1/bets/props/evaluate
 # ============================================================================
 
+
 class TestEvaluateProp:
     def test_requires_auth(self):
-        resp = client.post("/api/v1/bets/props/evaluate", json={
-            "player_id": 1, "prop_type": "HR", "line_value": 1.5,
-            "over_odds": +200, "under_odds": -250,
-            "features": {"exit_velo": 95.0},
-        })
+        resp = client.post(
+            "/api/v1/bets/props/evaluate",
+            json={
+                "player_id": 1,
+                "prop_type": "HR",
+                "line_value": 1.5,
+                "over_odds": +200,
+                "under_odds": -250,
+                "features": {"exit_velo": 95.0},
+            },
+        )
         assert resp.status_code == 401
 
     def test_returns_prop_response(self):
@@ -285,11 +365,18 @@ class TestEvaluateProp:
 
         with patch("prediction.poisson_props.PoissonPropsEngine") as mock_cls:
             mock_cls.return_value.evaluate_bet.return_value = mock_result
-            resp = client.post("/api/v1/bets/props/evaluate", json={
-                "player_id": 1, "prop_type": "HR", "line_value": 1.5,
-                "over_odds": +200, "under_odds": -250,
-                "features": {"exit_velo": 95.0},
-            }, headers=headers)
+            resp = client.post(
+                "/api/v1/bets/props/evaluate",
+                json={
+                    "player_id": 1,
+                    "prop_type": "HR",
+                    "line_value": 1.5,
+                    "over_odds": +200,
+                    "under_odds": -250,
+                    "features": {"exit_velo": 95.0},
+                },
+                headers=headers,
+            )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -303,11 +390,18 @@ class TestEvaluateProp:
 
         with patch("prediction.poisson_props.PoissonPropsEngine") as mock_cls:
             mock_cls.return_value.evaluate_bet.return_value = mock_result
-            resp = client.post("/api/v1/bets/props/evaluate", json={
-                "player_id": 1, "prop_type": "HR", "line_value": 1.5,
-                "over_odds": +200, "under_odds": -250,
-                "features": {"exit_velo": 95.0},
-            }, headers=headers)
+            resp = client.post(
+                "/api/v1/bets/props/evaluate",
+                json={
+                    "player_id": 1,
+                    "prop_type": "HR",
+                    "line_value": 1.5,
+                    "over_odds": +200,
+                    "under_odds": -250,
+                    "features": {"exit_velo": 95.0},
+                },
+                headers=headers,
+            )
 
         assert resp.status_code == 204
 
@@ -315,20 +409,36 @@ class TestEvaluateProp:
         headers = _auth_header()
         with patch("prediction.poisson_props.PoissonPropsEngine") as mock_cls:
             mock_cls.return_value.evaluate_bet.return_value = MagicMock(
-                recommendation="over", player_name="Player_99",
-                prop_type="STRIKEOUTS", line_value=5.5,
-                predicted_mean=0.0, prob_over=0.0, prob_under=0.0,
-                ev_over=0.0, ev_under=0.0, kelly_fraction=0.0,
+                recommendation="over",
+                player_name="Player_99",
+                prop_type="STRIKEOUTS",
+                line_value=5.5,
+                predicted_mean=0.0,
+                prob_over=0.0,
+                prob_under=0.0,
+                ev_over=0.0,
+                ev_under=0.0,
+                kelly_fraction=0.0,
             )
-            client.post("/api/v1/bets/props/evaluate", json={
-                "player_id": 99, "prop_type": "STRIKEOUTS", "line_value": 5.5,
-                "over_odds": +150, "under_odds": -180,
-                "features": {"k_pct": 0.28},
-            }, headers=headers)
+            client.post(
+                "/api/v1/bets/props/evaluate",
+                json={
+                    "player_id": 99,
+                    "prop_type": "STRIKEOUTS",
+                    "line_value": 5.5,
+                    "over_odds": +150,
+                    "under_odds": -180,
+                    "features": {"k_pct": 0.28},
+                },
+                headers=headers,
+            )
 
         mock_cls.return_value.evaluate_bet.assert_called_once_with(
-            prop_type="STRIKEOUTS", player_name="Player_99",
-            line_value=5.5, over_odds=+150, under_odds=-180,
+            prop_type="STRIKEOUTS",
+            player_name="Player_99",
+            line_value=5.5,
+            over_odds=+150,
+            under_odds=-180,
             features={"k_pct": 0.28},
         )
 
@@ -337,25 +447,54 @@ class TestEvaluateProp:
 # POST /api/v1/bets/slip
 # ============================================================================
 
+
 class TestSubmitBetSlip:
     def test_requires_auth(self):
-        resp = client.post("/api/v1/bets/slip", json={
-            "bets": [{"game_id": "G1", "team": "NYY", "market_type": "MONEYLINE",
-                      "odds": -110, "stake": 100.0, "edge": 0.05, "kelly_fraction": 0.02}]
-        })
+        resp = client.post(
+            "/api/v1/bets/slip",
+            json={
+                "bets": [
+                    {
+                        "game_id": "G1",
+                        "team": "NYY",
+                        "market_type": "MONEYLINE",
+                        "odds": -110,
+                        "stake": 100.0,
+                        "edge": 0.05,
+                        "kelly_fraction": 0.02,
+                    }
+                ]
+            },
+        )
         assert resp.status_code == 401
 
     def test_approved_when_no_violations(self):
         headers = _auth_header()
         with patch("risk.bankroll_manager.PersistentBankrollManager") as mock_cls:
             mock_cls.return_value.check_exposure.return_value = {
-                "approved": True, "violations": [], "current_bankroll": 10000,
-                "stake": 100, "stake_pct": 0.01,
+                "approved": True,
+                "violations": [],
+                "current_bankroll": 10000,
+                "stake": 100,
+                "stake_pct": 0.01,
             }
-            resp = client.post("/api/v1/bets/slip", json={
-                "bets": [{"game_id": "G1", "team": "NYY", "market_type": "MONEYLINE",
-                          "odds": -110, "stake": 100.0, "edge": 0.05, "kelly_fraction": 0.02}]
-            }, headers=headers)
+            resp = client.post(
+                "/api/v1/bets/slip",
+                json={
+                    "bets": [
+                        {
+                            "game_id": "G1",
+                            "team": "NYY",
+                            "market_type": "MONEYLINE",
+                            "odds": -110,
+                            "stake": 100.0,
+                            "edge": 0.05,
+                            "kelly_fraction": 0.02,
+                        }
+                    ]
+                },
+                headers=headers,
+            )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -366,13 +505,29 @@ class TestSubmitBetSlip:
         headers = _auth_header()
         with patch("risk.bankroll_manager.PersistentBankrollManager") as mock_cls:
             mock_cls.return_value.check_exposure.return_value = {
-                "approved": False, "violations": ["Exceeds max stake per bet"],
-                "current_bankroll": 10000, "stake": 600, "stake_pct": 0.06,
+                "approved": False,
+                "violations": ["Exceeds max stake per bet"],
+                "current_bankroll": 10000,
+                "stake": 600,
+                "stake_pct": 0.06,
             }
-            resp = client.post("/api/v1/bets/slip", json={
-                "bets": [{"game_id": "G1", "team": "NYY", "market_type": "MONEYLINE",
-                          "odds": -110, "stake": 600.0, "edge": 0.05, "kelly_fraction": 0.02}]
-            }, headers=headers)
+            resp = client.post(
+                "/api/v1/bets/slip",
+                json={
+                    "bets": [
+                        {
+                            "game_id": "G1",
+                            "team": "NYY",
+                            "market_type": "MONEYLINE",
+                            "odds": -110,
+                            "stake": 600.0,
+                            "edge": 0.05,
+                            "kelly_fraction": 0.02,
+                        }
+                    ]
+                },
+                headers=headers,
+            )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -383,17 +538,38 @@ class TestSubmitBetSlip:
         headers = _auth_header()
         with patch("risk.bankroll_manager.PersistentBankrollManager") as mock_cls:
             mock_cls.return_value.check_exposure.return_value = {
-                "approved": True, "violations": [], "current_bankroll": 10000,
-                "stake": 150, "stake_pct": 0.015,
+                "approved": True,
+                "violations": [],
+                "current_bankroll": 10000,
+                "stake": 150,
+                "stake_pct": 0.015,
             }
-            resp = client.post("/api/v1/bets/slip", json={
-                "bets": [
-                    {"game_id": "G1", "team": "NYY", "market_type": "MONEYLINE",
-                     "odds": -110, "stake": 100.0, "edge": 0.05, "kelly_fraction": 0.02},
-                    {"game_id": "G2", "team": "LAD", "market_type": "MONEYLINE",
-                     "odds": +150, "stake": 50.0, "edge": 0.03, "kelly_fraction": 0.01},
-                ]
-            }, headers=headers)
+            resp = client.post(
+                "/api/v1/bets/slip",
+                json={
+                    "bets": [
+                        {
+                            "game_id": "G1",
+                            "team": "NYY",
+                            "market_type": "MONEYLINE",
+                            "odds": -110,
+                            "stake": 100.0,
+                            "edge": 0.05,
+                            "kelly_fraction": 0.02,
+                        },
+                        {
+                            "game_id": "G2",
+                            "team": "LAD",
+                            "market_type": "MONEYLINE",
+                            "odds": +150,
+                            "stake": 50.0,
+                            "edge": 0.03,
+                            "kelly_fraction": 0.01,
+                        },
+                    ]
+                },
+                headers=headers,
+            )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -403,8 +579,11 @@ class TestSubmitBetSlip:
         headers = _auth_header()
         with patch("risk.bankroll_manager.PersistentBankrollManager") as mock_cls:
             mock_cls.return_value.check_exposure.return_value = {
-                "approved": True, "violations": [], "current_bankroll": 10000,
-                "stake": 0, "stake_pct": 0,
+                "approved": True,
+                "violations": [],
+                "current_bankroll": 10000,
+                "stake": 0,
+                "stake_pct": 0,
             }
             resp = client.post("/api/v1/bets/slip", json={"bets": []}, headers=headers)
 
@@ -417,6 +596,7 @@ class TestSubmitBetSlip:
 # GET /api/v1/bets/simulate/{game_id}
 # ============================================================================
 
+
 class TestGetSimulation:
     def test_requires_auth(self):
         resp = client.get("/api/v1/bets/simulate/GAME-001")
@@ -427,10 +607,14 @@ class TestGetSimulation:
         # run_distribution is now parsed with json.loads (bug fixed),
         # so mock row returns a JSON string as SQLite would
         mock_row = [
-            0.58, 0.42,
-            4.5, 3.8,
-            2.1, 1.9,
-            0.08, 0.03,
+            0.58,
+            0.42,
+            4.5,
+            3.8,
+            2.1,
+            1.9,
+            0.08,
+            0.03,
             '{"0":0.1,"1":0.2}',  # run_distribution as JSON string
             10000,
             "2026-05-20T12:00:00",
@@ -461,6 +645,7 @@ class TestGetSimulation:
 # ============================================================================
 # GET /api/v1/bets/approved
 # ============================================================================
+
 
 class TestGetApprovedBets:
     def test_requires_auth(self):
@@ -499,6 +684,7 @@ class TestGetApprovedBets:
 # ============================================================================
 # GET /api/v1/bets/history
 # ============================================================================
+
 
 class TestGetBetHistory:
     def test_requires_auth(self):

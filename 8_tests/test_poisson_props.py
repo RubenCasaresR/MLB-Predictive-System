@@ -1,22 +1,31 @@
 """Tests para PoissonPropsEngine, modelos y trainer."""
 
-import pytest
-import sys, os, tempfile, math
+import math
+import os
+import sys
+import tempfile
 from dataclasses import asdict
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from scipy.stats import poisson
-from prediction.poisson_props import (
-    PoissonModel, StrikeoutModel, HitModel,
-    PropBetResult, PoissonPropsEngine, PoissonModelTrainer,
-)
 
+from prediction.poisson_props import (
+    HitModel,
+    PoissonModel,
+    PoissonModelTrainer,
+    PoissonPropsEngine,
+    PropBetResult,
+    StrikeoutModel,
+)
 
 # ============================================================================
 # Modelo Poisson
 # ============================================================================
+
 
 class TestPoissonModel:
     def test_predict_log_lambda_zero_coefficients(self):
@@ -93,37 +102,60 @@ class TestHitModel:
 # Feature engineering
 # ============================================================================
 
+
 class TestBuildStrikeoutFeatures:
     def test_all_fields_present(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.12, opponent_k_pct=0.23,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.12,
+            opponent_k_pct=0.23,
         )
         assert len(feats) == 15
-        assert all(k in feats for k in [
-            "avg_velo", "whiff_pct", "opponent_k_pct", "park_k_factor",
-            "days_rested", "avg_spin", "pitch_count_l30", "swing_pct",
-            "o_contact_pct", "home_plate_ump_cs_rate", "is_away",
-            "is_division_game", "month", "temperature", "precipitation_pct",
-        ])
+        assert all(
+            k in feats
+            for k in [
+                "avg_velo",
+                "whiff_pct",
+                "opponent_k_pct",
+                "park_k_factor",
+                "days_rested",
+                "avg_spin",
+                "pitch_count_l30",
+                "swing_pct",
+                "o_contact_pct",
+                "home_plate_ump_cs_rate",
+                "is_away",
+                "is_division_game",
+                "month",
+                "temperature",
+                "precipitation_pct",
+            ]
+        )
 
     def test_velo_normalized(self):
         engine = PoissonPropsEngine()
         # velo=93 → avg_velo=0
         feats = engine.build_strikeout_features(
-            pitcher_velo=93.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
+            pitcher_velo=93.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
         )
         assert feats["avg_velo"] == 0.0
         # velo=97 → avg_velo=4
         feats = engine.build_strikeout_features(
-            pitcher_velo=97.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
+            pitcher_velo=97.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
         )
         assert feats["avg_velo"] == 4.0
 
     def test_spin_normalized(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
             pitcher_spin=2200.0,
         )
         assert feats["avg_spin"] == 0.0
@@ -131,7 +163,9 @@ class TestBuildStrikeoutFeatures:
     def test_park_k_factor_normalized(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
             park_k_factor=1.0,
         )
         assert feats["park_k_factor"] == 0.0
@@ -139,7 +173,9 @@ class TestBuildStrikeoutFeatures:
     def test_temp_normalized(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
             temperature=72.0,
         )
         assert feats["temperature"] == 0.0
@@ -147,7 +183,9 @@ class TestBuildStrikeoutFeatures:
     def test_ump_cs_rate_normalized(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
             ump_cs_rate=0.48,
         )
         assert feats["home_plate_ump_cs_rate"] == 0.0
@@ -155,14 +193,20 @@ class TestBuildStrikeoutFeatures:
     def test_booleans_converted(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
-            is_away=True, is_division_game=True,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
+            is_away=True,
+            is_division_game=True,
         )
         assert feats["is_away"] == 1.0
         assert feats["is_division_game"] == 1.0
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
-            is_away=False, is_division_game=False,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
+            is_away=False,
+            is_division_game=False,
         )
         assert feats["is_away"] == 0.0
         assert feats["is_division_game"] == 0.0
@@ -170,7 +214,9 @@ class TestBuildStrikeoutFeatures:
     def test_defaults(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.1, opponent_k_pct=0.2,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.1,
+            opponent_k_pct=0.2,
         )
         assert feats["days_rested"] == 4
         assert feats["month"] == 6
@@ -181,38 +227,61 @@ class TestBuildStrikeoutFeatures:
 class TestBuildHitFeatures:
     def test_all_fields_present(self):
         engine = PoissonPropsEngine()
-        feats = engine.build_hit_features(woba=0.320, hard_hit_pct=0.35, barrel_pct=0.08, opponent_fip=4.20)
+        feats = engine.build_hit_features(
+            woba=0.320, hard_hit_pct=0.35, barrel_pct=0.08, opponent_fip=4.20
+        )
         assert len(feats) == 9
-        assert all(k in feats for k in [
-            "woba", "hard_hit_pct", "barrel_pct", "opponent_fip",
-            "park_hit_factor", "platoon_advantage", "k_rate",
-            "bb_rate", "launch_angle_avg",
-        ])
+        assert all(
+            k in feats
+            for k in [
+                "woba",
+                "hard_hit_pct",
+                "barrel_pct",
+                "opponent_fip",
+                "park_hit_factor",
+                "platoon_advantage",
+                "k_rate",
+                "bb_rate",
+                "launch_angle_avg",
+            ]
+        )
 
     def test_woba_normalized(self):
         engine = PoissonPropsEngine()
-        feats = engine.build_hit_features(woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20)
+        feats = engine.build_hit_features(
+            woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20
+        )
         assert feats["woba"] == 0.0
 
     def test_fip_normalized(self):
         engine = PoissonPropsEngine()
-        feats = engine.build_hit_features(woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20)
+        feats = engine.build_hit_features(
+            woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20
+        )
         assert feats["opponent_fip"] == 0.0
 
     def test_k_rate_normalized(self):
         engine = PoissonPropsEngine()
-        feats = engine.build_hit_features(woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, k_rate=0.220)
+        feats = engine.build_hit_features(
+            woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, k_rate=0.220
+        )
         assert feats["k_rate"] == 0.0
 
     def test_launch_angle_normalized(self):
         engine = PoissonPropsEngine()
-        feats = engine.build_hit_features(woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, launch_angle_avg=12.0)
+        feats = engine.build_hit_features(
+            woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, launch_angle_avg=12.0
+        )
         assert feats["launch_angle_avg"] == 0.0
 
     def test_platoon_advantage_boolean(self):
         engine = PoissonPropsEngine()
-        feats_true = engine.build_hit_features(woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, platoon_advantage=True)
-        feats_false = engine.build_hit_features(woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, platoon_advantage=False)
+        feats_true = engine.build_hit_features(
+            woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, platoon_advantage=True
+        )
+        feats_false = engine.build_hit_features(
+            woba=0.310, hard_hit_pct=0.3, barrel_pct=0.1, opponent_fip=4.20, platoon_advantage=False
+        )
         assert feats_true["platoon_advantage"] == 1.0
         assert feats_false["platoon_advantage"] == 0.0
 
@@ -220,6 +289,7 @@ class TestBuildHitFeatures:
 # ============================================================================
 # Utilitarios
 # ============================================================================
+
 
 class TestAmericanToImplied:
     def test_positive_odds(self):
@@ -318,10 +388,13 @@ class TestPoissonCDF:
 # Motor principal
 # ============================================================================
 
+
 class TestPredict:
     def test_returns_lambda_and_std(self):
         engine = PoissonPropsEngine()
-        lam, std = engine.predict("STRIKEOUTS", {"avg_velo": 4.0, "whiff_pct": 0.12, "opponent_k_pct": 0.22})
+        lam, std = engine.predict(
+            "STRIKEOUTS", {"avg_velo": 4.0, "whiff_pct": 0.12, "opponent_k_pct": 0.22}
+        )
         assert lam > 0
         assert std == math.sqrt(lam)
 
@@ -332,7 +405,9 @@ class TestPredict:
 
     def test_hits_model_works(self):
         engine = PoissonPropsEngine()
-        lam, std = engine.predict("HITS", {"woba": 0.7, "hard_hit_pct": 0.4, "barrel_pct": 0.1, "opponent_fip": 0.3})
+        lam, std = engine.predict(
+            "HITS", {"woba": 0.7, "hard_hit_pct": 0.4, "barrel_pct": 0.1, "opponent_fip": 0.3}
+        )
         assert lam > 0
 
 
@@ -343,9 +418,15 @@ class TestEvaluateBetStrikeouts:
     def cole_features(self):
         engine = PoissonPropsEngine()
         return engine.build_strikeout_features(
-            pitcher_velo=97.5, pitcher_whiff_pct=0.15, opponent_k_pct=0.22,
-            park_k_factor=1.02, days_rested=5, pitcher_spin=2450.0,
-            swing_pct=0.48, o_contact_pct=0.65, ump_cs_rate=0.50,
+            pitcher_velo=97.5,
+            pitcher_whiff_pct=0.15,
+            opponent_k_pct=0.22,
+            park_k_factor=1.02,
+            days_rested=5,
+            pitcher_spin=2450.0,
+            swing_pct=0.48,
+            o_contact_pct=0.65,
+            ump_cs_rate=0.50,
             is_away=False,
         )
 
@@ -357,8 +438,11 @@ class TestEvaluateBetStrikeouts:
     def test_line_under_ev_positive(self, cole_features):
         engine = PoissonPropsEngine()
         result = engine.evaluate_bet(
-            prop_type="STRIKEOUTS", player_name="Gerrit Cole",
-            line_value=6.5, over_odds=-110, under_odds=-110,
+            prop_type="STRIKEOUTS",
+            player_name="Gerrit Cole",
+            line_value=6.5,
+            over_odds=-110,
+            under_odds=-110,
             features=cole_features,
         )
         assert result.recommendation in ("over", "under")
@@ -368,8 +452,11 @@ class TestEvaluateBetStrikeouts:
     def test_line_7_5_at_even_odds(self, cole_features):
         engine = PoissonPropsEngine()
         result = engine.evaluate_bet(
-            prop_type="STRIKEOUTS", player_name="Gerrit Cole",
-            line_value=7.5, over_odds=-110, under_odds=-110,
+            prop_type="STRIKEOUTS",
+            player_name="Gerrit Cole",
+            line_value=7.5,
+            over_odds=-110,
+            under_odds=-110,
             features=cole_features,
         )
         assert result.prop_type == "STRIKEOUTS"
@@ -383,8 +470,11 @@ class TestEvaluateBetStrikeouts:
     def test_recommendation_over_when_ev_positive(self, cole_features):
         engine = PoissonPropsEngine()
         result = engine.evaluate_bet(
-            prop_type="STRIKEOUTS", player_name="Gerrit Cole",
-            line_value=6.5, over_odds=-110, under_odds=-110,
+            prop_type="STRIKEOUTS",
+            player_name="Gerrit Cole",
+            line_value=6.5,
+            over_odds=-110,
+            under_odds=-110,
             features=cole_features,
         )
         if result.ev_over > result.ev_under and result.ev_over > 0.02:
@@ -397,8 +487,11 @@ class TestEvaluateBetStrikeouts:
     def test_kelly_fraction_between_zero_and_five_pct(self, cole_features):
         engine = PoissonPropsEngine()
         result = engine.evaluate_bet(
-            prop_type="STRIKEOUTS", player_name="Gerrit Cole",
-            line_value=6.5, over_odds=-110, under_odds=-110,
+            prop_type="STRIKEOUTS",
+            player_name="Gerrit Cole",
+            line_value=6.5,
+            over_odds=-110,
+            under_odds=-110,
             features=cole_features,
         )
         if result.recommendation != "no_bet":
@@ -414,9 +507,14 @@ class TestEvaluateBetHits:
     def judge_features(self):
         engine = PoissonPropsEngine()
         return engine.build_hit_features(
-            woba=0.380, hard_hit_pct=0.45, barrel_pct=0.12,
-            opponent_fip=4.50, park_hit_factor=1.05, platoon_advantage=True,
-            k_rate=0.20, bb_rate=0.10,
+            woba=0.380,
+            hard_hit_pct=0.45,
+            barrel_pct=0.12,
+            opponent_fip=4.50,
+            park_hit_factor=1.05,
+            platoon_advantage=True,
+            k_rate=0.20,
+            bb_rate=0.10,
         )
 
     def test_predicted_mean_reasonable(self, judge_features):
@@ -427,8 +525,11 @@ class TestEvaluateBetHits:
     def test_line_1_5_at_plus_odds(self, judge_features):
         engine = PoissonPropsEngine()
         result = engine.evaluate_bet(
-            prop_type="HITS", player_name="Aaron Judge",
-            line_value=1.5, over_odds=+120, under_odds=-150,
+            prop_type="HITS",
+            player_name="Aaron Judge",
+            line_value=1.5,
+            over_odds=+120,
+            under_odds=-150,
             features=judge_features,
         )
         assert result.prop_type == "HITS"
@@ -440,11 +541,16 @@ class TestEvaluateBetNoEdge:
     def test_line_far_above_mean_returns_under(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=91.0, pitcher_whiff_pct=0.05, opponent_k_pct=0.18,
+            pitcher_velo=91.0,
+            pitcher_whiff_pct=0.05,
+            opponent_k_pct=0.18,
         )
         result = engine.evaluate_bet(
-            prop_type="STRIKEOUTS", player_name="Low K Pitcher",
-            line_value=9.5, over_odds=-110, under_odds=-110,
+            prop_type="STRIKEOUTS",
+            player_name="Low K Pitcher",
+            line_value=9.5,
+            over_odds=-110,
+            under_odds=-110,
             features=feats,
         )
         # Very unlikely to get 9.5 Ks → under should have EV
@@ -454,11 +560,16 @@ class TestEvaluateBetNoEdge:
     def test_line_far_below_mean_returns_over(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=98.0, pitcher_whiff_pct=0.20, opponent_k_pct=0.25,
+            pitcher_velo=98.0,
+            pitcher_whiff_pct=0.20,
+            opponent_k_pct=0.25,
         )
         result = engine.evaluate_bet(
-            prop_type="STRIKEOUTS", player_name="High K Pitcher",
-            line_value=3.5, over_odds=-110, under_odds=-110,
+            prop_type="STRIKEOUTS",
+            player_name="High K Pitcher",
+            line_value=3.5,
+            over_odds=-110,
+            under_odds=-110,
             features=feats,
         )
         # Very likely to get 3.5+ Ks → over should have EV
@@ -470,11 +581,16 @@ class TestEvaluateBetZeroLine:
     def test_line_zero_over_always_has_prob_one(self):
         engine = PoissonPropsEngine()
         feats = engine.build_strikeout_features(
-            pitcher_velo=95.0, pitcher_whiff_pct=0.12, opponent_k_pct=0.22,
+            pitcher_velo=95.0,
+            pitcher_whiff_pct=0.12,
+            opponent_k_pct=0.22,
         )
         result = engine.evaluate_bet(
-            prop_type="STRIKEOUTS", player_name="Any",
-            line_value=0, over_odds=-500, under_odds=+300,
+            prop_type="STRIKEOUTS",
+            player_name="Any",
+            line_value=0,
+            over_odds=-500,
+            under_odds=+300,
             features=feats,
         )
         # P(X > 0) = 1 - P(X = 0) = 1 - e^(-lambda)
@@ -487,6 +603,7 @@ class TestEvaluateBetZeroLine:
 # ============================================================================
 # Trainer
 # ============================================================================
+
 
 class TestPoissonModelTrainer:
     def test_train_strikeout_model(self):
@@ -533,15 +650,24 @@ class TestPoissonModelTrainer:
 # PropBetResult
 # ============================================================================
 
+
 class TestPropBetResult:
     def test_dataclass_fields(self):
         result = PropBetResult(
-            prop_type="STRIKEOUTS", player_name="Test", line_value=6.5,
-            over_odds=-110, under_odds=-110,
-            predicted_mean=7.2, prob_over=0.65, prob_under=0.35,
-            implied_over=0.52, implied_under=0.48,
-            ev_over=0.13, ev_under=-0.13,
-            recommendation="over", kelly_fraction=0.025,
+            prop_type="STRIKEOUTS",
+            player_name="Test",
+            line_value=6.5,
+            over_odds=-110,
+            under_odds=-110,
+            predicted_mean=7.2,
+            prob_over=0.65,
+            prob_under=0.35,
+            implied_over=0.52,
+            implied_under=0.48,
+            ev_over=0.13,
+            ev_under=-0.13,
+            recommendation="over",
+            kelly_fraction=0.025,
         )
         d = asdict(result)
         assert d["prop_type"] == "STRIKEOUTS"
@@ -550,11 +676,18 @@ class TestPropBetResult:
 
     def test_no_bet_default_kelly(self):
         result = PropBetResult(
-            prop_type="HITS", player_name="Test", line_value=1.5,
-            over_odds=+120, under_odds=-150,
-            predicted_mean=1.1, prob_over=0.4, prob_under=0.6,
-            implied_over=0.35, implied_under=0.65,
-            ev_over=0.05, ev_under=-0.05,
+            prop_type="HITS",
+            player_name="Test",
+            line_value=1.5,
+            over_odds=+120,
+            under_odds=-150,
+            predicted_mean=1.1,
+            prob_over=0.4,
+            prob_under=0.6,
+            implied_over=0.35,
+            implied_under=0.65,
+            ev_over=0.05,
+            ev_under=-0.05,
             recommendation="no_bet",
         )
         assert result.kelly_fraction == 0.0

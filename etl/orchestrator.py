@@ -12,17 +12,19 @@
 #   6. Predicción: ejecutar Monte Carlo para juegos próximos
 # =============================================================================
 
-import os
-import sys
-import json
-import math
-import time
 import asyncio
-from typing import Optional
-from datetime import date, datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 import logging
 import logging.config
+import math
+import os
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta
+from typing import Optional
+
+from etl.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -33,29 +35,71 @@ class ETLOrchestrator:
         self.executor = ThreadPoolExecutor(max_workers=4)
         logger.info("ETLOrchestrator initialized")
 
-    def run_daily_pipeline(self, target_date: Optional[date] = None):
+    def _load_checkpoint(self, path: str) -> set:
+        try:
+            if os.path.exists(path):
+                with open(path) as f:
+                    return set(json.load(f))
+        except Exception as e:
+            logger.warning("Failed to load checkpoint %s: %s", path, e)
+        return set()
+
+    def _save_checkpoint(self, path: str, completed: set):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(sorted(completed), f, indent=2)
+        except Exception as e:
+            logger.warning("Failed to save checkpoint %s: %s", path, e)
+
+    def _clean_checkpoint(self, path: str):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                logger.debug("Removed checkpoint %s (all steps completed)", path)
+        except Exception as e:
+            logger.warning("Failed to remove checkpoint %s: %s", path, e)
+
+    def run_daily_pipeline(self, target_date: date | None = None):
         if target_date is None:
             target_date = date.today()
 
         logger.info(f"=== Starting daily ETL pipeline for {target_date} ===")
 
+        checkpoint_dir = os.getenv("MLB_LOGS_DIR", "logs")
+        checkpoint_file = os.path.join(
+            checkpoint_dir,
+            f"daily_checkpoint_{target_date.isoformat()}.json",
+        )
+        completed = self._load_checkpoint(checkpoint_file)
+
         steps = [
-            ("Loading game schedule", self._load_schedule),
-            ("Ingesting Statcast play-by-play", self._ingest_statcast),
-            ("Ingesting weather data", self._ingest_weather),
-            ("Ingesting market data", self._ingest_market),
-            ("Computing rolling features", self._compute_features),
-            ("Running predictions", self._run_predictions),
+            ("load_schedule", "Loading game schedule", self._load_schedule),
+            ("ingest_statcast", "Ingesting Statcast play-by-play", self._ingest_statcast),
+            ("ingest_weather", "Ingesting weather data", self._ingest_weather),
+            ("ingest_market", "Ingesting market data", self._ingest_market),
+            ("compute_features", "Computing rolling features", self._compute_features),
+            ("run_predictions", "Running predictions", self._run_predictions),
         ]
 
-        for i, (label, method) in enumerate(steps, 1):
+        for i, (step_name, label, method) in enumerate(steps, 1):
+            if step_name in completed:
+                logger.info(f"[{i}/{len(steps)}] {label} — already completed, skipping")
+                continue
+
             logger.info(f"[{i}/{len(steps)}] {label}...")
             try:
-                method(target_date)
+                with_retry()(method)(target_date)
+                completed.add(step_name)
+                self._save_checkpoint(checkpoint_file, completed)
             except Exception as e:
-                logger.error(f"[{i}/{len(steps)}] {label} FAILED: {e}", exc_info=True)
+                logger.error(
+                    f"[{i}/{len(steps)}] {label} FAILED after retries: {e}",
+                    exc_info=True,
+                )
                 logger.info("Continuing to next step...")
 
+        self._clean_checkpoint(checkpoint_file)
         logger.info(f"=== Pipeline complete for {target_date} ===")
 
     def _load_schedule(self, target_date: date):
@@ -68,8 +112,10 @@ class ETLOrchestrator:
             logger.info(f"No games scheduled for {target_date}")
             return
 
-        from sqlalchemy import create_engine, text
         import math
+
+        from sqlalchemy import create_engine, text
+
         engine = create_engine(self.db_url)
         with engine.begin() as conn:
             for _, game in games.iterrows():
@@ -77,6 +123,7 @@ class ETLOrchestrator:
                     text("SELECT stadium_id FROM stadiums WHERE team_id = :tid"),
                     {"tid": game["home_team_id"]},
                 ).scalar()
+
                 def _safe_int(val):
                     if val is None:
                         return None
@@ -85,6 +132,7 @@ class ETLOrchestrator:
                         return v if v > 0 else None
                     except (ValueError, TypeError, OverflowError):
                         return None
+
                 hpp = _safe_int(game.get("home_probable_pitcher"))
                 app = _safe_int(game.get("away_probable_pitcher"))
                 conn.execute(
@@ -119,23 +167,32 @@ class ETLOrchestrator:
 
     def _enrich_game_metadata(self, target_date: date):
         from sqlalchemy import create_engine, text
+
         engine = create_engine(self.db_url)
 
         from etl.ingestors.weather_ingestor import WeatherIngestor
+
         coords = WeatherIngestor.STADIUM_COORDS
         timezone_map = {
-            "America/New_York": -5, "America/Chicago": -6,
-            "America/Denver": -7, "America/Los_Angeles": -8,
-            "America/Toronto": -5, "America/Phoenix": -7,
+            "America/New_York": -5,
+            "America/Chicago": -6,
+            "America/Denver": -7,
+            "America/Los_Angeles": -8,
+            "America/Toronto": -5,
+            "America/Phoenix": -7,
         }
 
         def haversine(lat1, lon1, lat2, lon2):
             R = 3959
             dlat = math.radians(lat2 - lat1)
             dlon = math.radians(lon2 - lon1)
-            a = (math.sin(dlat/2)**2 + math.cos(math.radians(lat1))
-                 * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2)
-            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            a = (
+                math.sin(dlat / 2) ** 2
+                + math.cos(math.radians(lat1))
+                * math.cos(math.radians(lat2))
+                * math.sin(dlon / 2) ** 2
+            )
+            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         def get_tz_offset(tz_str):
             for k, v in timezone_map.items():
@@ -145,9 +202,38 @@ class ETLOrchestrator:
 
         coords_by_team = {}
         for sid, info in coords.items():
-            for tid in ["NYY", "BOS", "CHC", "LAD", "HOU", "ATL", "SFG", "STL", "PHI", "SDP",
-                        "NYM", "WSN", "BAL", "TBR", "MIA", "TOR", "CLE", "DET", "KCR", "MIN",
-                        "CHW", "LAA", "OAK", "SEA", "TEX", "ARI", "COL", "PIT", "CIN", "MIL"]:
+            for tid in [
+                "NYY",
+                "BOS",
+                "CHC",
+                "LAD",
+                "HOU",
+                "ATL",
+                "SFG",
+                "STL",
+                "PHI",
+                "SDP",
+                "NYM",
+                "WSN",
+                "BAL",
+                "TBR",
+                "MIA",
+                "TOR",
+                "CLE",
+                "DET",
+                "KCR",
+                "MIN",
+                "CHW",
+                "LAA",
+                "OAK",
+                "SEA",
+                "TEX",
+                "ARI",
+                "COL",
+                "PIT",
+                "CIN",
+                "MIL",
+            ]:
                 if tid in info["name"]:
                     coords_by_team[tid] = (info["lat"], info["lon"])
 
@@ -161,12 +247,16 @@ class ETLOrchestrator:
             ).fetchall()
 
             tz_cache = {}
+
             def get_tz(team_id):
                 if team_id not in tz_cache:
-                    tz_cache[team_id] = conn.execute(
-                        text("SELECT timezone FROM teams WHERE team_id = :tid"),
-                        {"tid": team_id},
-                    ).scalar() or "America/New_York"
+                    tz_cache[team_id] = (
+                        conn.execute(
+                            text("SELECT timezone FROM teams WHERE team_id = :tid"),
+                            {"tid": team_id},
+                        ).scalar()
+                        or "America/New_York"
+                    )
                 return tz_cache[team_id]
 
             for g in games_today:
@@ -181,25 +271,31 @@ class ETLOrchestrator:
                 travel_miles = int(round(haversine(ac[0], ac[1], hc[0], hc[1]))) if hc and ac else 0
 
                 gd_str = target_date.isoformat()
-                rest_days_home = conn.execute(
-                    text("""
+                rest_days_home = (
+                    conn.execute(
+                        text("""
                         SELECT COALESCE(MAX(CAST(:gd AS DATE) - game_date), 5)
                         FROM games
                         WHERE (home_team_id = :tid OR away_team_id = :tid)
                           AND game_date < CAST(:gd AS DATE) AND status = 'FINAL'
                     """),
-                    {"tid": g.home_team_id, "gd": gd_str},
-                ).scalar() or 5
+                        {"tid": g.home_team_id, "gd": gd_str},
+                    ).scalar()
+                    or 5
+                )
 
-                rest_days_away = conn.execute(
-                    text("""
+                rest_days_away = (
+                    conn.execute(
+                        text("""
                         SELECT COALESCE(MAX(CAST(:gd AS DATE) - game_date), 5)
                         FROM games
                         WHERE (home_team_id = :tid OR away_team_id = :tid)
                           AND game_date < CAST(:gd AS DATE) AND status = 'FINAL'
                     """),
-                    {"tid": g.away_team_id, "gd": gd_str},
-                ).scalar() or 5
+                        {"tid": g.away_team_id, "gd": gd_str},
+                    ).scalar()
+                    or 5
+                )
 
                 day_game_after_night_home = False
                 day_game_after_night_away = False
@@ -269,8 +365,8 @@ class ETLOrchestrator:
         ingestor.ingest_team_games(target_date)
 
     def _ingest_market(self, target_date: date):
-        from etl.ingestors.market_ingestor import MarketIngestor
         from etl.config import ODDS_API_KEY
+        from etl.ingestors.market_ingestor import MarketIngestor
 
         ingestor = MarketIngestor(self.db_url, ODDS_API_KEY)
         raw = ingestor.fetch_mlb_odds()
@@ -290,10 +386,11 @@ class ETLOrchestrator:
         pipeline.run_full_pipeline(target_date)
 
     def _run_predictions(self, target_date: date):
+        import numpy as np
         from sqlalchemy import create_engine, text
+
         from prediction.monte_carlo_simulator import MonteCarloMLBSimulator
         from prediction.player_state_builder import build_player_states_from_db
-        import numpy as np
 
         engine = create_engine(self.db_url)
 
@@ -319,11 +416,14 @@ class ETLOrchestrator:
         for game_id, home_team, away_team, home_p_id, away_p_id in upcoming:
             logger.info(f"Simulating {home_team} vs {away_team} ({game_id})")
 
-            home_lineup, away_lineup, home_pitcher, away_pitcher = (
-                build_player_states_from_db(
-                    engine, game_id, home_team, away_team,
-                    home_p_id, away_p_id, target_date,
-                )
+            home_lineup, away_lineup, home_pitcher, away_pitcher = build_player_states_from_db(
+                engine,
+                game_id,
+                home_team,
+                away_team,
+                home_p_id,
+                away_p_id,
+                target_date,
             )
 
             # Read all game factors from the materialized view + direct queries
@@ -360,6 +460,29 @@ class ETLOrchestrator:
                     """),
                     {"tid": away_team, "gd": target_date},
                 ).scalar()
+                hbpf = conn.execute(
+                    text("""
+                        SELECT bullpen_fip_30d FROM team_rolling_stats
+                        WHERE team_id = :tid AND as_of_date <= :gd
+                        ORDER BY as_of_date DESC LIMIT 1
+                    """),
+                    {"tid": home_team, "gd": target_date},
+                ).scalar()
+                abpf = conn.execute(
+                    text("""
+                        SELECT bullpen_fip_30d FROM team_rolling_stats
+                        WHERE team_id = :tid AND as_of_date <= :gd
+                        ORDER BY as_of_date DESC LIMIT 1
+                    """),
+                    {"tid": away_team, "gd": target_date},
+                ).scalar()
+                game_info = conn.execute(
+                    text("""
+                        SELECT venue_id, home_plate_umpire_id
+                        FROM games WHERE game_id = :gid
+                    """),
+                    {"gid": game_id},
+                ).fetchone()
 
             pf_hr = float(f.park_hr_factor) if f and f.park_hr_factor else 1.0
             pf_single = float(f.park_woba_factor) if f and f.park_woba_factor else 1.0
@@ -370,6 +493,10 @@ class ETLOrchestrator:
             ump_cs = float(f.umpire_cs_rate) if f and f.umpire_cs_rate else 0.0
             home_bp_era = float(hbp) if hbp else 4.50
             away_bp_era = float(abp) if abp else 4.50
+            home_bp_fip = float(hbpf) if hbpf else 4.50
+            away_bp_fip = float(abpf) if abpf else 4.50
+            stadium_id = int(game_info[0]) if game_info and game_info[0] else 0
+            umpire_id = int(game_info[1]) if game_info and game_info[1] else 0
             home_rest = int(f.home_rest_days) if f and f.home_rest_days else 4
             away_rest = int(f.away_rest_days) if f and f.away_rest_days else 4
             away_tz = int(f.away_tz_crossings) if f and f.away_tz_crossings else 0
@@ -390,6 +517,10 @@ class ETLOrchestrator:
                 wind_speed=wind_spd,
                 wind_direction=wind_dir,
                 umpire_cs_rate=ump_cs,
+                stadium_id=stadium_id,
+                umpire_id=umpire_id,
+                home_bullpen_fip_30d=home_bp_fip,
+                away_bullpen_fip_30d=away_bp_fip,
                 home_bullpen_era=home_bp_era,
                 away_bullpen_era=away_bp_era,
                 home_rest_days=home_rest,
@@ -427,20 +558,22 @@ class ETLOrchestrator:
                         "sa": round(result.std_away_runs, 2),
                         "ei": round(result.extra_innings_prob, 4),
                         "wo": round(result.walkoff_prob, 4),
-                        "rd_json": json.dumps({
-                            "home": {
-                                str(k): int(v) for k, v in
-                                __import__("collections").Counter(
-                                    result.home_runs_array.tolist()
-                                ).items()
-                            },
-                            "away": {
-                                str(k): int(v) for k, v in
-                                __import__("collections").Counter(
-                                    result.away_runs_array.tolist()
-                                ).items()
-                            },
-                        }),
+                        "rd_json": json.dumps(
+                            {
+                                "home": {
+                                    str(k): int(v)
+                                    for k, v in __import__("collections")
+                                    .Counter(result.home_runs_array.tolist())
+                                    .items()
+                                },
+                                "away": {
+                                    str(k): int(v)
+                                    for k, v in __import__("collections")
+                                    .Counter(result.away_runs_array.tolist())
+                                    .items()
+                                },
+                            }
+                        ),
                         "n": 10000,
                     },
                 )
@@ -453,18 +586,34 @@ class ETLOrchestrator:
         logger.info(f"Simulations complete for {len(upcoming)} games on {target_date}")
 
     def run_loop(self, interval_hours: int = 24):
+        import signal as _signal
+
+        _shutdown = False
+
+        def _handler(signum, frame):
+            nonlocal _shutdown
+            logger.info("Received signal %d — shutting down loop...", signum)
+            _shutdown = True
+
+        _signal.signal(_signal.SIGTERM, _handler)
+
         logger.info(f"Starting ETL loop (interval: {interval_hours}h)")
-        while True:
+        while not _shutdown:
             try:
                 self.run_daily_pipeline()
-                logger.info(f"Sleeping for {interval_hours} hours...")
-                time.sleep(interval_hours * 3600)
-            except KeyboardInterrupt:
-                logger.info("ETL loop stopped by user")
-                break
             except Exception as e:
                 logger.error(f"Pipeline failed: {e}")
-                time.sleep(300)
+
+            if _shutdown:
+                break
+
+            logger.info(f"Sleeping for {interval_hours} hours...")
+            for _ in range(interval_hours * 360):
+                if _shutdown:
+                    break
+                time.sleep(10)
+
+        logger.info("ETL loop exited gracefully")
 
 
 # ============================================================================
@@ -473,6 +622,7 @@ class ETLOrchestrator:
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
+
     load_dotenv()
 
     logging.basicConfig(

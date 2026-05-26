@@ -4,20 +4,26 @@
 # Rubén Eduardo Casares Rosales - MLB Predictive System
 # =============================================================================
 
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional
 import logging
+from typing import Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from api.auth import get_current_user
 from api.models.pydantic_models import BankrollResponse, ExposureResponse
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/v1/risk", tags=["risk"])
+router = APIRouter(
+    prefix="/api/v1/risk",
+    tags=["risk"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/bankroll", response_model=BankrollResponse)
 async def get_bankroll_status():
     from risk.bankroll_manager import PersistentBankrollManager
-    
+
     bm = PersistentBankrollManager()
     status = bm.status()
     return BankrollResponse(
@@ -37,8 +43,9 @@ async def get_bankroll_status():
 
 @router.post("/bankroll/update")
 async def update_bankroll(new_amount: float):
-    from risk.bankroll_manager import PersistentBankrollManager
     import os
+
+    from risk.bankroll_manager import PersistentBankrollManager
 
     if new_amount <= 0:
         raise HTTPException(status_code=400, detail="Bankroll must be positive")
@@ -58,7 +65,7 @@ async def update_bankroll(new_amount: float):
 @router.post("/exposure/check", response_model=ExposureResponse)
 async def check_exposure(
     stake: float = Query(..., gt=0),
-    sportsbook: Optional[str] = Query(None),
+    sportsbook: str | None = Query(None),
 ):
     from risk.bankroll_manager import PersistentBankrollManager
 
@@ -76,6 +83,7 @@ async def check_exposure(
 @router.get("/limits")
 async def get_risk_limits():
     from risk.bankroll_manager import ExposureLimit
+
     limits = ExposureLimit()
     return {
         "max_per_bet": limits.max_per_bet,
@@ -89,6 +97,7 @@ async def get_risk_limits():
 @router.get("/exposure/summary")
 async def get_exposure_summary():
     from sqlalchemy import text
+
     from api.database import get_engine
 
     engine = get_engine()

@@ -1,8 +1,10 @@
 """Tests para MarketIngestor (parseo con datos mock)."""
 
-import pytest
-import sys, os
+import os
+import sys
 from datetime import datetime
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -66,16 +68,36 @@ class TestTeamNameToAbbr:
 
     def test_all_30_teams_have_mapping(self, ingestor):
         teams = [
-            "New York Yankees", "Boston Red Sox", "Los Angeles Dodgers",
-            "Houston Astros", "Atlanta Braves", "New York Mets",
-            "Philadelphia Phillies", "San Diego Padres", "St. Louis Cardinals",
-            "Chicago Cubs", "San Francisco Giants", "Toronto Blue Jays",
-            "Milwaukee Brewers", "Baltimore Orioles", "Tampa Bay Rays",
-            "Seattle Mariners", "Texas Rangers", "Cleveland Guardians",
-            "Minnesota Twins", "Arizona Diamondbacks", "Cincinnati Reds",
-            "Miami Marlins", "Kansas City Royals", "Chicago White Sox",
-            "Detroit Tigers", "Colorado Rockies", "Pittsburgh Pirates",
-            "Los Angeles Angels", "Oakland Athletics", "Washington Nationals",
+            "New York Yankees",
+            "Boston Red Sox",
+            "Los Angeles Dodgers",
+            "Houston Astros",
+            "Atlanta Braves",
+            "New York Mets",
+            "Philadelphia Phillies",
+            "San Diego Padres",
+            "St. Louis Cardinals",
+            "Chicago Cubs",
+            "San Francisco Giants",
+            "Toronto Blue Jays",
+            "Milwaukee Brewers",
+            "Baltimore Orioles",
+            "Tampa Bay Rays",
+            "Seattle Mariners",
+            "Texas Rangers",
+            "Cleveland Guardians",
+            "Minnesota Twins",
+            "Arizona Diamondbacks",
+            "Cincinnati Reds",
+            "Miami Marlins",
+            "Kansas City Royals",
+            "Chicago White Sox",
+            "Detroit Tigers",
+            "Colorado Rockies",
+            "Pittsburgh Pirates",
+            "Los Angeles Angels",
+            "Oakland Athletics",
+            "Washington Nationals",
         ]
         for team in teams:
             assert len(ingestor._team_name_to_abbr(team)) == 3, f"Missing mapping for {team}"
@@ -144,7 +166,8 @@ class TestParseOdds:
         resp = [
             {
                 "id": "no-markets",
-                "home_team": "Team A", "away_team": "Team B",
+                "home_team": "Team A",
+                "away_team": "Team B",
                 "commence_time": "2026-05-20T19:00:00Z",
                 "bookmakers": [{"title": "DK", "markets": []}],
             }
@@ -175,10 +198,17 @@ class TestFetchPublicVolume:
         def mock_get(*a, **kw):
             class MockResp:
                 ok = True
-                def raise_for_status(self): pass
-                def json(self): return mock_response
+
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return mock_response
+
             return MockResp()
+
         import requests
+
         monkeypatch.setattr(requests, "get", mock_get)
         result = ingestor.fetch_public_volume("abc123")
         assert result is not None
@@ -191,10 +221,12 @@ class TestFetchPublicVolume:
 class TestLoadToDb:
     def test_loads_games(self, ingestor):
         from sqlalchemy import create_engine, text
+
         engine = create_engine("sqlite://")
         ingestor.engine = engine
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS market_lines (
                     game_id TEXT,
                     sportsbook_id INTEGER,
@@ -202,7 +234,8 @@ class TestLoadToDb:
                     home_moneyline_close INTEGER,
                     away_moneyline_close INTEGER
                 )
-            """))
+            """)
+            )
         parsed = {
             "games": [
                 {
@@ -222,11 +255,14 @@ class TestLoadToDb:
 
     def test_loads_empty_games(self, ingestor):
         from sqlalchemy import create_engine, text
+
         engine = create_engine("sqlite://")
         ingestor.engine = engine
         with engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE IF NOT EXISTS market_lines (game_id TEXT)
-            """))
+            """)
+            )
         ingestor.load_to_db({"games": [], "props": []})
         # Should not raise

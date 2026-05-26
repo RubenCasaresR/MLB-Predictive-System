@@ -1,9 +1,10 @@
 """Tests de integración API con FastAPI TestClient + SQLite en memoria."""
 
-import pytest
-import sys
-import os
 import json
+import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -15,7 +16,8 @@ from api.app import app
 
 def _create_tables(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
@@ -23,8 +25,10 @@ def _create_tables(engine):
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 role TEXT DEFAULT 'user'
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS games (
                 game_id TEXT PRIMARY KEY,
                 game_date TEXT NOT NULL,
@@ -37,8 +41,10 @@ def _create_tables(engine):
                 home_probable_pitcher INTEGER,
                 away_probable_pitcher INTEGER
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS alerts (
                 alert_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT,
@@ -49,8 +55,10 @@ def _create_tables(engine):
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 is_read INTEGER DEFAULT 0
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS approved_bets (
                 bet_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT NOT NULL,
@@ -67,8 +75,10 @@ def _create_tables(engine):
                 user_id INTEGER,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS bet_history (
                 bet_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT,
@@ -83,8 +93,10 @@ def _create_tables(engine):
                 sportsbook TEXT,
                 placed_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS simulation_results (
                 result_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id TEXT NOT NULL UNIQUE,
@@ -100,8 +112,10 @@ def _create_tables(engine):
                 n_iterations INTEGER,
                 computed_at TEXT
             )
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS bankroll_state (
                 state_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 current REAL NOT NULL DEFAULT 10000.0,
@@ -112,20 +126,24 @@ def _create_tables(engine):
                 bet_count INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-        """))
+        """)
+        )
 
 
 def _seed_data(engine):
     with engine.begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT OR IGNORE INTO games (game_id, game_date, home_team_id, away_team_id, status)
             VALUES ('2026-05-20-NYY-BOS', '2026-05-20', 'BOS', 'NYY', 'SCHEDULED')
-        """))
+        """)
+        )
 
 
 @pytest.fixture(autouse=True)
 def setup_db():
     import tempfile
+
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     db_url = f"sqlite:///{tmp.name}"
@@ -154,12 +172,16 @@ def setup_db():
 # Tests
 # ============================================================================
 
+
 class TestHealth:
     def test_health_endpoint(self, monkeypatch):
         import requests as http_requests
-        monkeypatch.setattr(http_requests, "get", lambda *a, **kw: type("R", (), {
-            "ok": True, "status_code": 200, "json": lambda: {}
-        })())
+
+        monkeypatch.setattr(
+            http_requests,
+            "get",
+            lambda *a, **kw: type("R", (), {"ok": True, "status_code": 200, "json": lambda: {}})(),
+        )
         resp = TestClient(app).get("/health")
         assert resp.status_code == 200
         data = resp.json()
@@ -171,10 +193,13 @@ class TestHealth:
 
 class TestAuth:
     def test_register(self):
-        resp = TestClient(app).post("/api/v1/auth/register", json={
-            "username": "testuser",
-            "password": "testpass123",
-        })
+        resp = TestClient(app).post(
+            "/api/v1/auth/register",
+            json={
+                "username": "testuser",
+                "password": "testpass123",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "access_token" in data
@@ -183,27 +208,39 @@ class TestAuth:
 
     def test_register_duplicate(self):
         client = TestClient(app)
-        client.post("/api/v1/auth/register", json={
-            "username": "dupuser",
-            "password": "pass123",
-        })
-        resp = client.post("/api/v1/auth/register", json={
-            "username": "dupuser",
-            "password": "pass123",
-        })
+        client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "dupuser",
+                "password": "pass123",
+            },
+        )
+        resp = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "dupuser",
+                "password": "pass123",
+            },
+        )
         assert resp.status_code == 400
         assert "already exists" in resp.json()["detail"].lower()
 
     def test_login_success(self):
         client = TestClient(app)
-        client.post("/api/v1/auth/register", json={
-            "username": "loginuser",
-            "password": "mypassword",
-        })
-        resp = client.post("/api/v1/auth/login", data={
-            "username": "loginuser",
-            "password": "mypassword",
-        })
+        client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "loginuser",
+                "password": "mypassword",
+            },
+        )
+        resp = client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "loginuser",
+                "password": "mypassword",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "access_token" in data
@@ -211,21 +248,30 @@ class TestAuth:
 
     def test_login_wrong_password(self):
         client = TestClient(app)
-        client.post("/api/v1/auth/register", json={
-            "username": "badpassuser",
-            "password": "correctpw",
-        })
-        resp = client.post("/api/v1/auth/login", data={
-            "username": "badpassuser",
-            "password": "wrongpw",
-        })
+        client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "badpassuser",
+                "password": "correctpw",
+            },
+        )
+        resp = client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "badpassuser",
+                "password": "wrongpw",
+            },
+        )
         assert resp.status_code == 401
 
     def test_login_nonexistent_user(self):
-        resp = TestClient(app).post("/api/v1/auth/login", data={
-            "username": "ghost",
-            "password": "x",
-        })
+        resp = TestClient(app).post(
+            "/api/v1/auth/login",
+            data={
+                "username": "ghost",
+                "password": "x",
+            },
+        )
         assert resp.status_code == 401
 
 
@@ -248,30 +294,45 @@ class TestPublicEndpoints:
 
 class TestBetsProtected:
     def test_ev_requires_auth(self):
-        resp = TestClient(app).post("/api/v1/bets/ev", json={
-            "game_id": "test",
-            "home_odds": -110,
-            "away_odds": -110,
-            "home_real_prob": 0.55,
-            "away_real_prob": 0.45,
-        })
+        resp = TestClient(app).post(
+            "/api/v1/bets/ev",
+            json={
+                "game_id": "test",
+                "home_odds": -110,
+                "away_odds": -110,
+                "home_real_prob": 0.55,
+                "away_real_prob": 0.45,
+            },
+        )
         assert resp.status_code == 401
 
     def test_ev_with_token(self):
         cli = TestClient(app)
-        cli.post("/api/v1/auth/register", json={
-            "username": "bettor", "password": "pass123",
-        })
-        token = cli.post("/api/v1/auth/login", data={
-            "username": "bettor", "password": "pass123",
-        }).json()["access_token"]
-        resp = cli.post("/api/v1/bets/ev", json={
-            "game_id": "test",
-            "home_odds": -110,
-            "away_odds": -110,
-            "home_real_prob": 0.55,
-            "away_real_prob": 0.45,
-        }, headers={"Authorization": f"Bearer {token}"})
+        cli.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "bettor",
+                "password": "pass123",
+            },
+        )
+        token = cli.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "bettor",
+                "password": "pass123",
+            },
+        ).json()["access_token"]
+        resp = cli.post(
+            "/api/v1/bets/ev",
+            json={
+                "game_id": "test",
+                "home_odds": -110,
+                "away_odds": -110,
+                "home_real_prob": 0.55,
+                "away_real_prob": 0.45,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "bets" in data
@@ -283,14 +344,21 @@ class TestBetsProtected:
 
     def test_approved_with_token(self):
         cli = TestClient(app)
-        cli.post("/api/v1/auth/register", json={
-            "username": "approver", "password": "pass",
-        })
-        token = cli.post("/api/v1/auth/login", data={
-            "username": "approver", "password": "pass",
-        }).json()["access_token"]
-        resp = cli.get("/api/v1/bets/approved",
-            headers={"Authorization": f"Bearer {token}"})
+        cli.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "approver",
+                "password": "pass",
+            },
+        )
+        token = cli.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "approver",
+                "password": "pass",
+            },
+        ).json()["access_token"]
+        resp = cli.get("/api/v1/bets/approved", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
@@ -303,9 +371,6 @@ class TestBetsProtected:
         assert resp.status_code == 401
 
 
-
-
-
 class TestRiskProtected:
     def test_bankroll_requires_auth(self):
         resp = TestClient(app).get("/api/v1/risk/bankroll")
@@ -313,14 +378,21 @@ class TestRiskProtected:
 
     def test_bankroll_with_token(self):
         cli = TestClient(app)
-        cli.post("/api/v1/auth/register", json={
-            "username": "riskuser", "password": "riskpass",
-        })
-        token = cli.post("/api/v1/auth/login", data={
-            "username": "riskuser", "password": "riskpass",
-        }).json()["access_token"]
-        resp = cli.get("/api/v1/risk/bankroll",
-            headers={"Authorization": f"Bearer {token}"})
+        cli.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "riskuser",
+                "password": "riskpass",
+            },
+        )
+        token = cli.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "riskuser",
+                "password": "riskpass",
+            },
+        ).json()["access_token"]
+        resp = cli.get("/api/v1/risk/bankroll", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
         data = resp.json()
         assert "current" in data
@@ -332,14 +404,21 @@ class TestRiskProtected:
 
     def test_limits_with_token(self):
         cli = TestClient(app)
-        cli.post("/api/v1/auth/register", json={
-            "username": "limitsuser", "password": "pass",
-        })
-        token = cli.post("/api/v1/auth/login", data={
-            "username": "limitsuser", "password": "pass",
-        }).json()["access_token"]
-        resp = cli.get("/api/v1/risk/limits",
-            headers={"Authorization": f"Bearer {token}"})
+        cli.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "limitsuser",
+                "password": "pass",
+            },
+        )
+        token = cli.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "limitsuser",
+                "password": "pass",
+            },
+        ).json()["access_token"]
+        resp = cli.get("/api/v1/risk/limits", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
         data = resp.json()
         assert "max_per_bet" in data

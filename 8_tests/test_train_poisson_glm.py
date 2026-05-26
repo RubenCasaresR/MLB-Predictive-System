@@ -1,44 +1,65 @@
 """Tests para train_poisson_glm.py (PoissonGLMTrainer)."""
 
+import json
+import os
+import pickle
+import sys
+from unittest.mock import MagicMock, mock_open, patch
+
 import pytest
-import sys, os, json, pickle
-from unittest.mock import patch, MagicMock, mock_open
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import pandas as pd
+
 from prediction.model_training.train_poisson_glm import PoissonGLMTrainer
 
-
-SAMPLE_RAW_DF = pd.DataFrame({
-    "pitcher_id": [1, 1, 1, 1, 2, 2, 2, 2],
-    "game_date": pd.to_datetime([
-        "2024-05-01", "2024-05-01", "2024-05-02", "2024-05-02",
-        "2024-05-01", "2024-05-01", "2024-05-02", "2024-05-02",
-    ]),
-    "velo": [96.0, 95.0, 94.0, 93.0, 90.0, 91.0, 89.0, 88.0],
-    "spin": [2500, 2450, 2400, 2350, 2100, 2150, 2050, 2000],
-    "whiff": [0, 0, 1, 0, 0, 1, 0, 0],
-    "is_k": [0, 1, 0, 0, 1, 0, 0, 1],
-})
+SAMPLE_RAW_DF = pd.DataFrame(
+    {
+        "pitcher_id": [1, 1, 1, 1, 2, 2, 2, 2],
+        "game_date": pd.to_datetime(
+            [
+                "2024-05-01",
+                "2024-05-01",
+                "2024-05-02",
+                "2024-05-02",
+                "2024-05-01",
+                "2024-05-01",
+                "2024-05-02",
+                "2024-05-02",
+            ]
+        ),
+        "velo": [96.0, 95.0, 94.0, 93.0, 90.0, 91.0, 89.0, 88.0],
+        "spin": [2500, 2450, 2400, 2350, 2100, 2150, 2050, 2000],
+        "whiff": [0, 0, 1, 0, 0, 1, 0, 0],
+        "is_k": [0, 1, 0, 0, 1, 0, 0, 1],
+    }
+)
 
 # Larger dataset with clear signal: higher velo → more strikeouts
-LARGER_RAW_DF = pd.DataFrame({
-    "pitcher_id": [1]*40 + [2]*40,
-    "game_date": pd.to_datetime(
-        [f"2024-{m:02d}-{d:02d}" for m in range(1, 5) for d in range(1, 11)] * 2
-    ),
-    "velo": [98.0 + (i % 10) * 0.2 for i in range(40)] + [88.0 + (i % 10) * 0.2 for i in range(40)],
-    "spin": [2500 + (i % 10) * 10 for i in range(40)] + [2000 + (i % 10) * 10 for i in range(40)],
-    "whiff": [0.3 + (i % 10) * 0.02 for i in range(40)] + [0.1 + (i % 10) * 0.01 for i in range(40)],
-    "is_k": [1 if i % 3 == 0 else 0 for i in range(40)] + [1 if i % 5 == 0 else 0 for i in range(40)],
-})
+LARGER_RAW_DF = pd.DataFrame(
+    {
+        "pitcher_id": [1] * 40 + [2] * 40,
+        "game_date": pd.to_datetime(
+            [f"2024-{m:02d}-{d:02d}" for m in range(1, 5) for d in range(1, 11)] * 2
+        ),
+        "velo": [98.0 + (i % 10) * 0.2 for i in range(40)]
+        + [88.0 + (i % 10) * 0.2 for i in range(40)],
+        "spin": [2500 + (i % 10) * 10 for i in range(40)]
+        + [2000 + (i % 10) * 10 for i in range(40)],
+        "whiff": [0.3 + (i % 10) * 0.02 for i in range(40)]
+        + [0.1 + (i % 10) * 0.01 for i in range(40)],
+        "is_k": [1 if i % 3 == 0 else 0 for i in range(40)]
+        + [1 if i % 5 == 0 else 0 for i in range(40)],
+    }
+)
 
 
 # ============================================================================
 # __init__
 # ============================================================================
+
 
 class TestInit:
     def test_stores_db_url(self, tmp_path):
@@ -61,6 +82,7 @@ class TestInit:
 # ============================================================================
 # load_training_data
 # ============================================================================
+
 
 class TestLoadTrainingData:
     @patch("prediction.model_training.train_poisson_glm.pd.read_sql")
@@ -106,6 +128,7 @@ class TestLoadTrainingData:
 # ============================================================================
 # extract_strikeout_features
 # ============================================================================
+
 
 class TestExtractStrikeoutFeatures:
     def test_returns_features_and_targets(self):
@@ -169,11 +192,12 @@ class TestExtractStrikeoutFeatures:
 # train_strikeout_model (mocked DB)
 # ============================================================================
 
+
 class TestTrainStrikeoutModelConvergence:
     @patch.object(PoissonGLMTrainer, "load_training_data")
     def test_returns_dict_with_expected_keys(self, mock_load):
         mock_load.return_value = LARGER_RAW_DF
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         model = t.train_strikeout_model([2024])
         assert "intercept" in model
         assert "coefficients" in model
@@ -184,7 +208,7 @@ class TestTrainStrikeoutModelConvergence:
     @patch.object(PoissonGLMTrainer, "load_training_data")
     def test_coefficients_have_expected_keys(self, mock_load):
         mock_load.return_value = SAMPLE_RAW_DF
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         model = t.train_strikeout_model([2024])
         assert "velo_centered" in model["coefficients"]
         assert "whiff_rate" in model["coefficients"]
@@ -193,7 +217,7 @@ class TestTrainStrikeoutModelConvergence:
     @patch.object(PoissonGLMTrainer, "load_training_data")
     def test_metrics_have_expected_keys(self, mock_load):
         mock_load.return_value = SAMPLE_RAW_DF
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         model = t.train_strikeout_model([2024])
         assert "r_squared" in model["metrics"]
         assert "mse" in model["metrics"]
@@ -204,14 +228,14 @@ class TestTrainStrikeoutModelConvergence:
     @patch.object(PoissonGLMTrainer, "load_training_data")
     def test_seasons_stored(self, mock_load):
         mock_load.return_value = LARGER_RAW_DF
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         model = t.train_strikeout_model([2023, 2024])
         assert model["seasons"] == [2023, 2024]
 
     @patch.object(PoissonGLMTrainer, "load_training_data")
     def test_coefficients_not_all_zero(self, mock_load):
         mock_load.return_value = LARGER_RAW_DF
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         model = t.train_strikeout_model([2024])
         coefs = model["coefficients"]
         assert any(abs(v) > 1e-6 for v in coefs.values())
@@ -233,32 +257,35 @@ class TestTrainStrikeoutModelConvergence:
 # train_strikeout_model (edge cases)
 # ============================================================================
 
+
 class TestTrainStrikeoutModelEdgeCases:
     @patch.object(PoissonGLMTrainer, "load_training_data")
     def test_empty_data_raises(self, mock_load):
         mock_load.return_value = pd.DataFrame()
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         with pytest.raises((KeyError, ValueError)):
             t.train_strikeout_model([2024])
 
     @patch.object(PoissonGLMTrainer, "load_training_data")
     def test_single_valid_season(self, mock_load):
         mock_load.return_value = SAMPLE_RAW_DF
-        d = PoissonGLMTrainer("sqlite://", str("models"))
+        d = PoissonGLMTrainer("sqlite://", "models")
         model = d.train_strikeout_model([2024])
         assert model["seasons"] == [2024]
 
     def test_linalg_error_fallback(self):
         # Force LinAlgError by passing degenerate data with zero variance
-        df = pd.DataFrame({
-            "pitcher_id": [1, 1],
-            "game_date": pd.to_datetime(["2024-05-01", "2024-05-01"]),
-            "velo": [95.0, 95.0],
-            "spin": [2400.0, 2400.0],
-            "whiff": [0.5, 0.5],
-            "is_k": [2, 2],
-        })
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        df = pd.DataFrame(
+            {
+                "pitcher_id": [1, 1],
+                "game_date": pd.to_datetime(["2024-05-01", "2024-05-01"]),
+                "velo": [95.0, 95.0],
+                "spin": [2400.0, 2400.0],
+                "whiff": [0.5, 0.5],
+                "is_k": [2, 2],
+            }
+        )
+        t = PoissonGLMTrainer("sqlite://", "models")
         X, y = t.extract_strikeout_features(df)
         # Identical rows → perfect collinearity (but we have only 1 row after groupby)
         # The IRLS with solve may fail on singular XWX
@@ -271,6 +298,7 @@ class TestTrainStrikeoutModelEdgeCases:
 # ============================================================================
 # evaluate_model
 # ============================================================================
+
 
 class TestEvaluateModel:
     def test_returns_metrics_dict(self, tmp_path):
@@ -291,14 +319,14 @@ class TestEvaluateModel:
         with open(path, "w") as f:
             json.dump(model, f)
 
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         metrics = t.evaluate_model(str(path))
         assert metrics["r_squared"] == 0.85
         assert metrics["mse"] == 0.12
         assert metrics["mae"] == 0.30
 
     def test_file_not_found(self):
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         with pytest.raises(FileNotFoundError):
             t.evaluate_model("nonexistent.json")
 
@@ -308,8 +336,11 @@ class TestEvaluateModel:
             "intercept": 0.0,
             "coefficients": {},
             "metrics": {
-                "r_squared": 0.0, "mse": 0.0, "mae": 0.0,
-                "train_samples": 0, "test_samples": 0,
+                "r_squared": 0.0,
+                "mse": 0.0,
+                "mae": 0.0,
+                "train_samples": 0,
+                "test_samples": 0,
             },
             "trained_at": "",
             "seasons": [],
@@ -317,7 +348,7 @@ class TestEvaluateModel:
         with open(path, "w") as f:
             json.dump(model, f)
 
-        t = PoissonGLMTrainer("sqlite://", str("models"))
+        t = PoissonGLMTrainer("sqlite://", "models")
         metrics = t.evaluate_model(str(path))
         assert metrics["train_samples"] == 0
         assert metrics["test_samples"] == 0
@@ -326,6 +357,7 @@ class TestEvaluateModel:
 # ============================================================================
 # Integración: mock DB → train → evaluate
 # ============================================================================
+
 
 class TestIntegration:
     @patch("prediction.model_training.train_poisson_glm.pd.read_sql")

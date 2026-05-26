@@ -6,9 +6,9 @@
 
 import asyncio
 import json
-from typing import Dict, List, Optional
-from datetime import datetime, date
 import logging
+from datetime import date, datetime
+from typing import Dict, List, Optional
 
 from api.models.pydantic_models import SimulationRequest, SimulationResponse
 
@@ -22,16 +22,19 @@ def _parse_game_id_date(game_id: str) -> date:
 
 class SimulationService:
     def __init__(self):
-        self.cache: Dict[str, SimulationResponse] = {}
+        self.cache: dict[str, SimulationResponse] = {}
         logger.info("SimulationService initialized")
 
     async def run_simulation(self, request: SimulationRequest) -> SimulationResponse:
+        from sqlalchemy import text
+
+        from api.database import get_engine
         from prediction.monte_carlo_simulator import MonteCarloMLBSimulator
         from prediction.player_state_builder import (
-            _fetch_pitcher_state, _fetch_team_lineup, _build_placeholder_lineup,
+            _build_placeholder_lineup,
+            _fetch_pitcher_state,
+            _fetch_team_lineup,
         )
-        from api.database import get_engine
-        from sqlalchemy import text
 
         engine = get_engine()
         target_date = _parse_game_id_date(request.game_id)
@@ -40,13 +43,21 @@ class SimulationService:
         away_lineup = _fetch_team_lineup(engine, request.away_team_id, target_date)
 
         if len(home_lineup) < 9:
-            home_lineup.extend(_build_placeholder_lineup(
-                request.home_team_id, 0.310, 9 - len(home_lineup),
-            ))
+            home_lineup.extend(
+                _build_placeholder_lineup(
+                    request.home_team_id,
+                    0.310,
+                    9 - len(home_lineup),
+                )
+            )
         if len(away_lineup) < 9:
-            away_lineup.extend(_build_placeholder_lineup(
-                request.away_team_id, 0.310, 9 - len(away_lineup),
-            ))
+            away_lineup.extend(
+                _build_placeholder_lineup(
+                    request.away_team_id,
+                    0.310,
+                    9 - len(away_lineup),
+                )
+            )
 
         home_pitcher = _fetch_pitcher_state(
             engine, request.home_pitcher_id if request.home_pitcher_id else 0, target_date
@@ -87,12 +98,8 @@ class SimulationService:
             extra_innings_prob=result.extra_innings_prob,
             walkoff_prob=result.walkoff_prob,
             n_iterations=request.n_iterations,
-            home_run_distribution={
-                str(k): v for k, v in result.home_run_distribution.items()
-            },
-            away_run_distribution={
-                str(k): v for k, v in result.away_run_distribution.items()
-            },
+            home_run_distribution={str(k): v for k, v in result.home_run_distribution.items()},
+            away_run_distribution={str(k): v for k, v in result.away_run_distribution.items()},
             computed_at=now,
         )
 
@@ -134,10 +141,12 @@ class SimulationService:
                     "sars": result.std_away_runs,
                     "eip": result.extra_innings_prob,
                     "wp": result.walkoff_prob,
-                    "rd": json.dumps({
-                        "home": {str(k): v for k, v in result.home_run_distribution.items()},
-                        "away": {str(k): v for k, v in result.away_run_distribution.items()},
-                    }),
+                    "rd": json.dumps(
+                        {
+                            "home": {str(k): v for k, v in result.home_run_distribution.items()},
+                            "away": {str(k): v for k, v in result.away_run_distribution.items()},
+                        }
+                    ),
                     "ni": request.n_iterations,
                     "ca": now,
                 },
@@ -145,10 +154,9 @@ class SimulationService:
 
         self.cache[request.game_id] = response
         logger.info(
-            f"Simulation complete for {request.game_id}: "
-            f"P(home)={result.home_win_prob:.3f}"
+            f"Simulation complete for {request.game_id}: P(home)={result.home_win_prob:.3f}"
         )
         return response
 
-    def get_cached(self, game_id: str) -> Optional[SimulationResponse]:
+    def get_cached(self, game_id: str) -> SimulationResponse | None:
         return self.cache.get(game_id)

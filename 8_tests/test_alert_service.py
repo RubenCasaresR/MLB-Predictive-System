@@ -1,10 +1,12 @@
 """Tests para api/services/alert_service.py (AlertService)."""
 
-import pytest
 import asyncio
-import sys, os
+import os
+import sys
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import ANY, MagicMock, patch
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -60,6 +62,7 @@ def make_mock_bet(**overrides):
 # ============================================================================
 # Tests for __init__
 # ============================================================================
+
 
 class TestAlertServiceInit:
     def test_init_empty_history(self):
@@ -123,6 +126,7 @@ class TestScanMarketForAlerts:
 
     def test_multiple_games_multiple_signals(self):
         self._setup()
+
         def side_effect(**kwargs):
             gid = kwargs["game_id"]
             if gid == "G1":
@@ -133,11 +137,12 @@ class TestScanMarketForAlerts:
                     make_mock_signal(game_id="G2", team_id="NYY", is_actionable=False),
                 ]
             return []
+
         self.mock_detector.analyze_full_game.side_effect = side_effect
 
-        run_async(self.svc.scan_market_for_alerts({
-            "games": [{"game_id": "G1"}, {"game_id": "G2"}]
-        }))
+        run_async(
+            self.svc.scan_market_for_alerts({"games": [{"game_id": "G1"}, {"game_id": "G2"}]})
+        )
         self._teardown()
 
         assert len(self.svc.alert_history) == 2
@@ -208,18 +213,24 @@ class TestScanMarketForAlerts:
         self._setup()
         self.mock_detector.analyze_full_game.return_value = []
 
-        run_async(self.svc.scan_market_for_alerts({
-            "games": [{
-                "game_id": "G-2026",
-                "home_team_id": "NYY",
-                "away_team_id": "BOS",
-                "sportsbook": "FanDuel",
-                "home_ticket_pct": 70.0,
-                "home_money_pct": 40.0,
-                "home_moneyline_open": -140,
-                "home_moneyline_close": -125,
-            }]
-        }))
+        run_async(
+            self.svc.scan_market_for_alerts(
+                {
+                    "games": [
+                        {
+                            "game_id": "G-2026",
+                            "home_team_id": "NYY",
+                            "away_team_id": "BOS",
+                            "sportsbook": "FanDuel",
+                            "home_ticket_pct": 70.0,
+                            "home_money_pct": 40.0,
+                            "home_moneyline_open": -140,
+                            "home_moneyline_close": -125,
+                        }
+                    ]
+                }
+            )
+        )
         self._teardown()
 
         self.mock_detector.analyze_full_game.assert_called_once_with(
@@ -301,15 +312,21 @@ class TestScanEVAlerts:
         self._setup()
         self.mock_calc.evaluate_moneyline.return_value = []
 
-        run_async(self.svc.scan_ev_alerts([{
-            "game_id": "G-CALC",
-            "home_team": "NYY",
-            "away_team": "BOS",
-            "home_win_prob": 0.58,
-            "away_win_prob": 0.42,
-            "home_odds": -130,
-            "away_odds": +110,
-        }]))
+        run_async(
+            self.svc.scan_ev_alerts(
+                [
+                    {
+                        "game_id": "G-CALC",
+                        "home_team": "NYY",
+                        "away_team": "BOS",
+                        "home_win_prob": 0.58,
+                        "away_win_prob": 0.42,
+                        "home_odds": -130,
+                        "away_odds": +110,
+                    }
+                ]
+            )
+        )
         self._teardown()
 
         self.mock_calc.evaluate_moneyline.assert_called_once_with(
@@ -324,18 +341,24 @@ class TestScanEVAlerts:
 
     def test_multiple_simulations(self):
         self._setup()
+
         def side_effect(**kwargs):
             gid = kwargs["game_id"]
             if gid == "G1":
                 return [make_mock_bet(game_id="G1", team="NYY")]
             return [make_mock_bet(game_id=gid, team="BOS")]
+
         self.mock_calc.evaluate_moneyline.side_effect = side_effect
 
-        run_async(self.svc.scan_ev_alerts([
-            {"game_id": "G1"},
-            {"game_id": "G2"},
-            {"game_id": "G3"},
-        ]))
+        run_async(
+            self.svc.scan_ev_alerts(
+                [
+                    {"game_id": "G1"},
+                    {"game_id": "G2"},
+                    {"game_id": "G3"},
+                ]
+            )
+        )
         self._teardown()
 
         assert self.mock_calc.evaluate_moneyline.call_count == 3
@@ -371,11 +394,13 @@ class TestContinuousScan:
             with patch("api.services.alert_service.asyncio.sleep") as mock_sleep:
                 real_now = datetime.now()
                 call_count = [0]
+
                 def mock_now():
                     call_count[0] += 1
                     if call_count[0] >= 3:
                         return real_now + timedelta(hours=4)
                     return real_now
+
                 with patch("api.services.alert_service.datetime") as mock_dt:
                     mock_dt.now = mock_now
                     run_async(svc.continuous_scan(interval_seconds=1, duration_minutes=180))
@@ -390,11 +415,13 @@ class TestContinuousScan:
             with patch("api.services.alert_service.asyncio.sleep") as mock_sleep:
                 real_now = datetime.now()
                 call_count = [0]
+
                 def mock_now():
                     call_count[0] += 1
                     if call_count[0] >= 3:
                         return real_now + timedelta(hours=4)
                     return real_now
+
                 with patch("api.services.alert_service.datetime") as mock_dt:
                     mock_dt.now = mock_now
                     run_async(svc.continuous_scan(interval_seconds=30, duration_minutes=180))
@@ -408,11 +435,13 @@ class TestContinuousScan:
             with patch("api.services.alert_service.asyncio.sleep") as mock_sleep:
                 real_now = datetime.now()
                 call_count = [0]
+
                 def mock_now():
                     call_count[0] += 1
                     if call_count[0] >= 3:
                         return real_now + timedelta(hours=4)
                     return real_now
+
                 with patch("api.services.alert_service.datetime") as mock_dt:
                     mock_dt.now = mock_now
                     run_async(svc.continuous_scan(interval_seconds=1, duration_minutes=180))
@@ -434,18 +463,21 @@ class TestContinuousScan:
 # Tests for get_recent_alerts
 # ============================================================================
 
+
 class TestGetRecentAlerts:
     def _make_alerts(self, confidences):
         svc = AlertService()
         for i, c in enumerate(confidences):
-            svc.alert_history.append({
-                "game_id": f"G{i}",
-                "team_id": "T",
-                "signal_type": "SHARP_MONEY",
-                "confidence": c,
-                "timestamp": datetime.now(),
-                "details": {},
-            })
+            svc.alert_history.append(
+                {
+                    "game_id": f"G{i}",
+                    "team_id": "T",
+                    "signal_type": "SHARP_MONEY",
+                    "confidence": c,
+                    "timestamp": datetime.now(),
+                    "details": {},
+                }
+            )
         return svc
 
     def test_filters_by_min_confidence(self):
@@ -486,6 +518,7 @@ class TestGetRecentAlerts:
 # Tests for get_unread_count
 # ============================================================================
 
+
 class TestGetUnreadCount:
     def test_all_read_returns_zero(self):
         svc = AlertService()
@@ -517,6 +550,7 @@ class TestGetUnreadCount:
 # ============================================================================
 # Tests for mark_read
 # ============================================================================
+
 
 class TestMarkRead:
     def test_mark_all_read_when_no_id(self):

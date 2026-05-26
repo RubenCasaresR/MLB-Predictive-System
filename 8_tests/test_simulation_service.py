@@ -1,16 +1,17 @@
 """Tests para api/services/simulation_service.py (SimulationService)."""
 
-import pytest
 import asyncio
-import sys, os
+import os
+import sys
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from api.services.simulation_service import SimulationService
 from api.models.pydantic_models import SimulationRequest, SimulationResponse
-
+from api.services.simulation_service import SimulationService
 
 SAMPLE_REQUEST = SimulationRequest(
     game_id="2026-05-20-NYY-BOS",

@@ -14,21 +14,21 @@
 #   - Kelly Multiapuesta: correlación entre apuestas simultáneas
 # =============================================================================
 
-from typing import List, Dict, Optional, Tuple
+import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
-import math
-import logging
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 class KellyVariant(Enum):
     FULL = "full"
-    HALF = "half"       # 1/2 Kelly
-    QUARTER = "quarter" # 1/4 Kelly
-    EIGHTH = "eighth"   # 1/8 Kelly
-    THIRD = "third"     # 1/3 Kelly
+    HALF = "half"  # 1/2 Kelly
+    QUARTER = "quarter"  # 1/4 Kelly
+    EIGHTH = "eighth"  # 1/8 Kelly
+    THIRD = "third"  # 1/3 Kelly
 
 
 @dataclass
@@ -85,13 +85,17 @@ class KellyCriterion:
     ) -> KellyResult:
 
         if probability <= 0 or probability >= 1:
-            return KellyResult("", "", american_odds, probability, 0, 0, 0, 0, False, "conservative")
+            return KellyResult(
+                "", "", american_odds, probability, 0, 0, 0, 0, False, "conservative"
+            )
 
         decimal = self.odds_to_decimal(american_odds)
         b = decimal - 1
 
         if b <= 0:
-            return KellyResult("", "", american_odds, probability, 0, 0, 0, 0, False, "conservative")
+            return KellyResult(
+                "", "", american_odds, probability, 0, 0, 0, 0, False, "conservative"
+            )
 
         # Full Kelly
         full_kelly = (probability * (b + 1) - 1) / b
@@ -152,9 +156,7 @@ class KellyCriterion:
         result.bet_type = bet_type
         return result
 
-    def compute_multiple(
-        self, bets: List[Tuple[str, str, float, int, float]]
-    ) -> List[KellyResult]:
+    def compute_multiple(self, bets: list[tuple[str, str, float, int, float]]) -> list[KellyResult]:
 
         results = []
         total_kelly = 0.0
@@ -168,9 +170,7 @@ class KellyCriterion:
             scaling = 0.25 / total_kelly
             for r in results:
                 r.fractional_kelly = round(r.fractional_kelly * scaling, 4)
-                r.recommended_stake = round(
-                    self.bankroll * r.fractional_kelly, 2
-                )
+                r.recommended_stake = round(self.bankroll * r.fractional_kelly, 2)
             logger.info(f"Bets scaled by {scaling:.2f} (total kelly={total_kelly:.3f})")
 
         return results
@@ -182,13 +182,11 @@ class KellyCriterion:
         hedge_prob: float,
         hedge_odds: int,
         confidence: float = 1.0,
-    ) -> Dict:
+    ) -> dict:
 
         primary_result = self.compute(primary_prob, primary_odds, confidence)
 
-        hedge_result = self.compute(
-            hedge_prob, hedge_odds, confidence
-        )
+        hedge_result = self.compute(hedge_prob, hedge_odds, confidence)
 
         total_investment = primary_result.recommended_stake + hedge_result.recommended_stake
 
@@ -204,6 +202,7 @@ class KellyCriterion:
 # GESTOR DE BANKROLL
 # ============================================================================
 
+
 class BankrollManager:
     def __init__(self, initial: float = 10000.0):
         self.initial = initial
@@ -211,7 +210,7 @@ class BankrollManager:
         self.peak = initial
         self.total_wagered = 0.0
         self.total_profit = 0.0
-        self.bet_history: List[Dict] = []
+        self.bet_history: list[dict] = []
         self.drawdown = 0.0
         logger.info(f"BankrollManager: initial=${initial:.2f}")
 
@@ -235,14 +234,16 @@ class BankrollManager:
         else:
             self.drawdown = (self.peak - self.current) / self.peak
 
-        self.bet_history.append({
-            "stake": stake,
-            "odds": odds,
-            "won": result,
-            "bankroll_before": self.current + (profit if result else -stake),
-            "bankroll_after": self.current,
-            "timestamp": None,
-        })
+        self.bet_history.append(
+            {
+                "stake": stake,
+                "odds": odds,
+                "won": result,
+                "bankroll_before": self.current + (profit if result else -stake),
+                "bankroll_after": self.current,
+                "timestamp": None,
+            }
+        )
 
         logger.info(
             f"Bet recorded: stake=${stake:.2f}, odds={odds:+d}, "
@@ -271,12 +272,14 @@ class BankrollManager:
             returns.append(r)
             prev = bet["bankroll_after"]
         mean_ret = sum(returns) / len(returns)
-        std_ret = math.sqrt(
-            sum((r - mean_ret) ** 2 for r in returns) / len(returns)
-        ) if len(returns) > 1 else 0.001
+        std_ret = (
+            math.sqrt(sum((r - mean_ret) ** 2 for r in returns) / len(returns))
+            if len(returns) > 1
+            else 0.001
+        )
         return (mean_ret - risk_free_rate) / std_ret if std_ret > 0 else 0.0
 
-    def status(self) -> Dict:
+    def status(self) -> dict:
         return {
             "initial": round(self.initial, 2),
             "current": round(self.current, 2),

@@ -1,12 +1,15 @@
 """Tests para DataQualityValidator (calidad de datos ETL)."""
 
+import os
+import sys
+
 import pytest
-import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 from etl.validators.data_quality import DataQualityValidator
 
 
@@ -19,19 +22,24 @@ def validator():
 # Tests: validate_null_counts
 # ============================================================================
 
+
 class TestValidateNullCounts:
     def test_null_pct_exceeds_threshold(self, validator):
-        df = pd.DataFrame({
-            "release_speed": [95.0, None, None, None, None, None],
-        })
+        df = pd.DataFrame(
+            {
+                "release_speed": [95.0, None, None, None, None, None],
+            }
+        )
         issues = validator.validate_null_counts(df, "test")
         assert len(issues) == 1
         assert "release_speed" in issues[0]
 
     def test_null_pct_below_threshold(self, validator):
-        df = pd.DataFrame({
-            "release_speed": [95.0, 96.0, 94.0, 97.0, 93.0],
-        })
+        df = pd.DataFrame(
+            {
+                "release_speed": [95.0, 96.0, 94.0, 97.0, 93.0],
+            }
+        )
         issues = validator.validate_null_counts(df, "test")
         assert issues == []
 
@@ -56,20 +64,25 @@ class TestValidateNullCounts:
 # Tests: validate_ranges
 # ============================================================================
 
+
 class TestValidateRanges:
     def test_values_out_of_range(self, validator):
-        df = pd.DataFrame({
-            "release_speed": [60, 95, 115, 80],
-            "inning": [1, 2, 99, 4],
-        })
+        df = pd.DataFrame(
+            {
+                "release_speed": [60, 95, 115, 80],
+                "inning": [1, 2, 99, 4],
+            }
+        )
         issues = validator.validate_ranges(df, "test")
         assert len(issues) >= 2  # release_speed + inning (maybe more depends on pct)
 
     def test_all_values_in_range(self, validator):
-        df = pd.DataFrame({
-            "release_speed": [85, 90, 95, 100],
-            "inning": [1, 2, 3, 4],
-        })
+        df = pd.DataFrame(
+            {
+                "release_speed": [85, 90, 95, 100],
+                "inning": [1, 2, 3, 4],
+            }
+        )
         issues = validator.validate_ranges(df)
         assert issues == []
 
@@ -96,21 +109,26 @@ class TestValidateRanges:
 # Tests: validate_unique_keys
 # ============================================================================
 
+
 class TestValidateUniqueKeys:
     def test_duplicate_keys_found(self, validator):
-        df = pd.DataFrame({
-            "game_id": ["G1", "G1", "G2", "G1"],
-            "pitcher_id": [100, 100, 200, 100],
-        })
+        df = pd.DataFrame(
+            {
+                "game_id": ["G1", "G1", "G2", "G1"],
+                "pitcher_id": [100, 100, 200, 100],
+            }
+        )
         issues = validator.validate_unique_keys(df, ["game_id", "pitcher_id"], "test")
         assert len(issues) == 1
         assert "duplicados" in issues[0]
 
     def test_no_duplicates(self, validator):
-        df = pd.DataFrame({
-            "game_id": ["G1", "G1", "G2"],
-            "pitcher_id": [100, 200, 100],
-        })
+        df = pd.DataFrame(
+            {
+                "game_id": ["G1", "G1", "G2"],
+                "pitcher_id": [100, 200, 100],
+            }
+        )
         issues = validator.validate_unique_keys(df, ["game_id", "pitcher_id"])
         assert issues == []
 
@@ -124,21 +142,26 @@ class TestValidateUniqueKeys:
 # Tests: validate_pitch_consistency
 # ============================================================================
 
+
 class TestValidatePitchConsistency:
     def test_strike_and_ball_both_true(self, validator):
-        df = pd.DataFrame({
-            "strike": [True, False, True, True],
-            "ball": [False, False, True, False],
-        })
+        df = pd.DataFrame(
+            {
+                "strike": [True, False, True, True],
+                "ball": [False, False, True, False],
+            }
+        )
         issues = validator.validate_pitch_consistency(df)
         assert len(issues) == 1
         assert "strike y ball" in issues[0].lower()
 
     def test_no_conflicts(self, validator):
-        df = pd.DataFrame({
-            "strike": [True, False, True],
-            "ball": [False, True, False],
-        })
+        df = pd.DataFrame(
+            {
+                "strike": [True, False, True],
+                "ball": [False, True, False],
+            }
+        )
         issues = validator.validate_pitch_consistency(df)
         assert issues == []
 
@@ -152,21 +175,26 @@ class TestValidatePitchConsistency:
 # Tests: validate_pitcher_usage
 # ============================================================================
 
+
 class TestValidatePitcherUsage:
     def test_excessive_batters_faced(self, validator):
-        df = pd.DataFrame({
-            "game_id": ["G1"] * 45 + ["G2"] * 30,
-            "pitcher_id": [100] * 45 + [100] * 30,
-        })
+        df = pd.DataFrame(
+            {
+                "game_id": ["G1"] * 45 + ["G2"] * 30,
+                "pitcher_id": [100] * 45 + [100] * 30,
+            }
+        )
         issues = validator.validate_pitcher_usage(df)
         assert len(issues) == 1
         assert "40" in issues[0]
 
     def test_normal_usage(self, validator):
-        df = pd.DataFrame({
-            "game_id": ["G1"] * 30 + ["G2"] * 35,
-            "pitcher_id": [100] * 30 + [100] * 35,
-        })
+        df = pd.DataFrame(
+            {
+                "game_id": ["G1"] * 30 + ["G2"] * 35,
+                "pitcher_id": [100] * 30 + [100] * 35,
+            }
+        )
         issues = validator.validate_pitcher_usage(df)
         assert issues == []
 
@@ -180,12 +208,15 @@ class TestValidatePitcherUsage:
 # Tests: report
 # ============================================================================
 
+
 class TestReport:
     def test_report_structure(self, validator):
-        df = pd.DataFrame({
-            "release_speed": [95, None],
-            "inning": [1, None],
-        })
+        df = pd.DataFrame(
+            {
+                "release_speed": [95, None],
+                "inning": [1, None],
+            }
+        )
         report = validator.report(df, "my_data")
         assert isinstance(report, dict)
         assert report["dataset"] == "my_data"
