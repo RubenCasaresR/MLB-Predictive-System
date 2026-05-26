@@ -24,6 +24,46 @@ const GamesPage = {
         const showScore = isGameLive || isFinal || (g.home_score != null && g.away_score != null);
         const statusBadge = isGameLive ? 'badge-green' : isFinal ? 'badge-gray' : 'badge-blue';
         const logo = api.getTeamLogoHtml.bind(api);
+        const hp = g.home_pitcher || {};
+        const ap = g.away_pitcher || {};
+        const hb = g.home_bullpen || {};
+        const ab = g.away_bullpen || {};
+
+        const pitcherHtml = (pitcher, side) => {
+          if (!pitcher || !pitcher.name) {
+            return `<span class="pitcher-name tbd">P: TBD</span>`;
+          }
+          const parts = [];
+          if (pitcher.fip != null) parts.push(`FIP ${pitcher.fip.toFixed(2)}`);
+          if (pitcher.k_per_9 != null) parts.push(`K/9 ${pitcher.k_per_9.toFixed(1)}`);
+          if (pitcher.avg_velo != null) parts.push(`${pitcher.avg_velo.toFixed(1)}mph`);
+          return `
+            <span class="pitcher-name">P: ${pitcher.name} (${pitcher.throws || '?'})</span>
+            ${parts.length ? `<span class="pitcher-stats">${parts.join(' · ')}</span>` : ''}
+          `;
+        };
+
+        const bullpenHtml = (bullpen) => {
+          if (!bullpen || (bullpen.era == null && bullpen.fip == null)) return '';
+          const parts = [];
+          if (bullpen.era != null) parts.push(`ERA ${bullpen.era.toFixed(2)}`);
+          if (bullpen.fip != null) parts.push(`FIP ${bullpen.fip.toFixed(2)}`);
+          return `<span class="bullpen-stats">Bullpen: ${parts.join(' · ')}</span>`;
+        };
+
+        const compHtml = (g, side) => {
+          if (isLive || !g.better_team) return '';
+          const isVis = side === 'away';
+          const myTeam = isVis ? g.away_team : g.home_team;
+          const opp = isVis ? g.home_team : g.away_team;
+          const check = (cat) => g[cat] === side;
+          const cross = (cat) => g[cat] === (isVis ? 'home' : 'away');
+          const items = [];
+          items.push(`<span class="comp-item ${check('better_pitcher') ? 'comp-win' : cross('better_pitcher') ? 'comp-loss' : ''}">${check('better_pitcher') ? '✅' : cross('better_pitcher') ? '❌' : '➖'} Abridor</span>`);
+          items.push(`<span class="comp-item ${check('better_bullpen') ? 'comp-win' : cross('better_bullpen') ? 'comp-loss' : ''}">${check('better_bullpen') ? '✅' : cross('better_bullpen') ? '❌' : '➖'} Bullpen</span>`);
+          items.push(`<span class="comp-item ${check('better_offense') ? 'comp-win' : cross('better_offense') ? 'comp-loss' : ''}">${check('better_offense') ? '✅' : cross('better_offense') ? '❌' : '➖'} Ofensiva</span>`);
+          return `<div class="comparison-details">${items.join('')}</div>`;
+        };
 
         return `
         <div class="card game-card" ${g.game_id ? `onclick="App.route('simulations?game=${g.game_id}')"` : ''}>
@@ -34,7 +74,9 @@ const GamesPage = {
           <div class="game-matchup">
             <div class="team-info">
               <div class="team-name">${logo(g.away_team)}</div>
-              <span class="pitcher">${g.away_pitcher_id ? 'P: ' + g.away_pitcher_id : ''}</span>
+              ${pitcherHtml(ap, 'away')}
+              ${bullpenHtml(ab)}
+              ${compHtml(g, 'away')}
             </div>
             <div class="score-display">
               ${showScore ? `
@@ -45,7 +87,9 @@ const GamesPage = {
             </div>
             <div class="team-info" style="text-align:right">
               <div class="team-name">${logo(g.home_team)}</div>
-              <span class="pitcher">${g.home_pitcher_id ? 'P: ' + g.home_pitcher_id : ''}</span>
+              ${pitcherHtml(hp, 'home')}
+              ${bullpenHtml(hb)}
+              ${compHtml(g, 'home')}
             </div>
           </div>
           ${!showScore ? `
@@ -53,6 +97,11 @@ const GamesPage = {
             ${g.away_moneyline ? `<span class="odds-tag">${logo(g.away_team)} <strong>${api.formatOdds(g.away_moneyline)}</strong></span>` : ''}
             ${g.home_moneyline ? `<span class="odds-tag">${logo(g.home_team)} <strong>${api.formatOdds(g.home_moneyline)}</strong></span>` : ''}
             ${g.total ? `<span class="odds-tag">O/U <strong>${g.total}</strong></span>` : ''}
+          </div>
+          ` : ''}
+          ${!isLive && g.better_team ? `
+          <div class="game-better-team ${g.better_team === 'home' ? 'better-home' : 'better-away'}">
+            🏆 Mejor equipo: <strong>${g.better_team === 'home' ? g.home_team : g.away_team}</strong>
           </div>
           ` : ''}
           <div class="game-signals">

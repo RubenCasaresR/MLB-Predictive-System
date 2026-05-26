@@ -14,10 +14,128 @@ from datetime import date as d, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from api.database import get_engine
-from api.models.pydantic_models import PlayerStatsResponse, GamePreviewResponse
+from api.models.pydantic_models import (
+    PlayerStatsResponse, GamePreviewResponse,
+    PitcherPreviewStats, BullpenPreviewStats,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
+
+
+def _get_pitcher_stats(engine, pitcher_id) -> dict:
+    """Obtiene stats del pitcher desde player_rolling_stats y players"""
+    if not pitcher_id:
+        return {}
+    try:
+        pid = int(pitcher_id)
+    except (ValueError, TypeError):
+        return {}
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT p.full_name, p.throws,
+                   prs.fip_30d, prs.k_per_9_30d, prs.bb_per_9_30d,
+                   prs.hr_per_9_30d, prs.avg_velo_30d, prs.whiff_pct_30d,
+                   prs.fatigue_score
+            FROM players p
+            LEFT JOIN LATERAL (
+                SELECT * FROM player_rolling_stats
+                WHERE player_id = :pid
+                ORDER BY as_of_date DESC LIMIT 1
+            ) prs ON TRUE
+            WHERE p.player_id = :pid
+        """), {"pid": pid}).fetchone()
+    if not row:
+        return {}
+    return {
+        "name": row[0] or "",
+        "throws": row[1] or "",
+        "fip": float(row[2]) if row[2] else None,
+        "k_per_9": float(row[3]) if row[3] else None,
+        "bb_per_9": float(row[4]) if row[4] else None,
+        "hr_per_9": float(row[5]) if row[5] else None,
+        "avg_velo": float(row[6]) if row[6] else None,
+        "whiff_pct": float(row[7]) if row[7] else None,
+        "fatigue_score": float(row[8]) if row[8] else None,
+    }
+
+
+def _get_team_stats(engine, team_id) -> dict:
+    """Obtiene stats del equipo desde team_rolling_stats"""
+    if not team_id:
+        return {}
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT bullpen_era_30d, bullpen_fip_30d, woba_30d
+            FROM team_rolling_stats
+            WHERE team_id = :tid
+            ORDER BY as_of_date DESC LIMIT 1
+        """), {"tid": team_id}).fetchone()
+    if not row:
+        return {}
+    return {
+        "bullpen_era": float(row[0]) if row[0] else None,
+        "bullpen_fip": float(row[1]) if row[1] else None,
+        "woba": float(row[2]) if row[2] else None,
+    }
+
+
+def _compute_comparisons(home_pitcher: dict, away_pitcher: dict,
+                          home_team_stats: dict, away_team_stats: dict,
+                          home_win_prob: float, away_win_prob: float) -> dict:
+    """Determina qué equipo es mejor en cada categoría"""
+    better_pitcher = ""
+    if home_pitcher.get("fip") is not None and away_pitcher.get("fip") is not None:
+        better_pitcher = "home" if home_pitcher["fip"] < away_pitcher["fip"] else "away"
+    elif home_pitcher.get("fip") is not None:
+        better_pitcher = "home"
+    elif away_pitcher.get("fip") is not None:
+        better_pitcher = "away"
+
+    better_bullpen = ""
+    he = home_team_stats.get("bullpen_era")
+    ae = away_team_stats.get("bullpen_era")
+    if he is not None and ae is not None:
+        better_bullpen = "home" if he < ae else "away"
+    elif he is not None:
+        better_bullpen = "home"
+    elif ae is not None:
+        better_bullpen = "away"
+
+    better_offense = ""
+    hw = home_team_stats.get("woba")
+    aw = away_team_stats.get("woba")
+    if hw is not None and aw is not None:
+        better_offense = "home" if hw > aw else "away"
+    elif hw is not None:
+        better_offense = "home"
+    elif aw is not None:
+        better_offense = "away"
+
+    better_team = ""
+    if home_win_prob > 0 or away_win_prob > 0:
+        if home_win_prob >= away_win_prob:
+            better_team = "home" if home_win_prob > away_win_prob else ""
+        else:
+            better_team = "away"
+    else:
+        home_wins = sum([
+            1 for c in [better_pitcher, better_bullpen, better_offense] if c == "home"
+        ])
+        away_wins = sum([
+            1 for c in [better_pitcher, better_bullpen, better_offense] if c == "away"
+        ])
+        if home_wins > away_wins:
+            better_team = "home"
+        elif away_wins > home_wins:
+            better_team = "away"
+
+    return {
+        "better_team": better_team,
+        "better_pitcher": better_pitcher,
+        "better_bullpen": better_bullpen,
+        "better_offense": better_offense,
+    }
 
 
 def _to_local_tz(dt_str: str) -> str:
@@ -142,22 +260,43 @@ async def get_game_preview(game_id: str):
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
 
+    home_team = row[1] or ""
+    away_team = row[2] or ""
+    home_pitcher_id = row[3]
+    away_pitcher_id = row[4]
+
+    hp = _get_pitcher_stats(engine, home_pitcher_id)
+    ap = _get_pitcher_stats(engine, away_pitcher_id)
+    ht = _get_team_stats(engine, home_team)
+    at = _get_team_stats(engine, away_team)
+
+    home_wp = float(row[10]) if row[10] else 0
+    away_wp = float(row[11]) if row[11] else 0
+    comp = _compute_comparisons(hp, ap, ht, at, home_wp, away_wp)
+
     return GamePreviewResponse(
         game_id=game_id,
         game_date=str(row[0]) if row[0] else "",
-        home_team=row[1] or "",
-        away_team=row[2] or "",
-        home_pitcher_id=row[3],
-        away_pitcher_id=row[4],
+        home_team=home_team,
+        away_team=away_team,
+        home_pitcher_id=home_pitcher_id,
+        away_pitcher_id=away_pitcher_id,
         status=row[5] or "",
         start_time=_to_local_tz(str(row[6])) if row[6] else "",
         home_moneyline=row[7],
         away_moneyline=row[8],
         total=float(row[9]) if row[9] else None,
-        home_win_prob=float(row[10]) if row[10] else None,
-        away_win_prob=float(row[11]) if row[11] else None,
+        home_win_prob=home_wp,
+        away_win_prob=away_wp,
         sharp_money_flag=bool(row[12]) if row[12] else False,
         rlm_flag=bool(row[13]) if row[13] else False,
+        home_pitcher=PitcherPreviewStats(**hp),
+        away_pitcher=PitcherPreviewStats(**ap),
+        home_bullpen=BullpenPreviewStats(era=ht.get("bullpen_era"), fip=ht.get("bullpen_fip")),
+        away_bullpen=BullpenPreviewStats(era=at.get("bullpen_era"), fip=at.get("bullpen_fip")),
+        home_woba=ht.get("woba"),
+        away_woba=at.get("woba"),
+        **comp,
     )
 
 
@@ -194,21 +333,43 @@ async def list_todays_games(date: Optional[str] = Query(None)):
             {"gd": target},
         ).fetchall()
 
-    return [
-        GamePreviewResponse(
+    results = []
+    for r in rows:
+        home_pitcher_id = r[4]
+        away_pitcher_id = r[5]
+        home_team = r[2] or ""
+        away_team = r[3] or ""
+
+        hp = _get_pitcher_stats(engine, home_pitcher_id)
+        ap = _get_pitcher_stats(engine, away_pitcher_id)
+        ht = _get_team_stats(engine, home_team)
+        at = _get_team_stats(engine, away_team)
+
+        home_wp = float(r[11]) if r[11] is not None else 0
+        away_wp = float(r[12]) if r[12] is not None else 0
+        comp = _compute_comparisons(hp, ap, ht, at, home_wp, away_wp)
+
+        results.append(GamePreviewResponse(
             game_id=r[0], game_date=str(r[1]) or "",
-            home_team=r[2] or "", away_team=r[3] or "",
-            home_pitcher_id=r[4], away_pitcher_id=r[5],
+            home_team=home_team, away_team=away_team,
+            home_pitcher_id=home_pitcher_id, away_pitcher_id=away_pitcher_id,
             status=r[6] or "", start_time=_to_local_tz(str(r[7])) if r[7] else "",
             home_moneyline=r[8], away_moneyline=r[9],
             total=float(r[10]) if r[10] else None,
-            home_win_prob=float(r[11]) if r[11] else None,
-            away_win_prob=float(r[12]) if r[12] else None,
+            home_win_prob=home_wp,
+            away_win_prob=away_wp,
             sharp_money_flag=bool(r[13]) if r[13] else False,
             rlm_flag=bool(r[14]) if r[14] else False,
-        )
-        for r in rows
-    ]
+            home_pitcher=PitcherPreviewStats(**hp),
+            away_pitcher=PitcherPreviewStats(**ap),
+            home_bullpen=BullpenPreviewStats(era=ht.get("bullpen_era"), fip=ht.get("bullpen_fip")),
+            away_bullpen=BullpenPreviewStats(era=at.get("bullpen_era"), fip=at.get("bullpen_fip")),
+            home_woba=ht.get("woba"),
+            away_woba=at.get("woba"),
+            **comp,
+        ))
+
+    return results
 
 
 @router.get("/teams/{team_id}")

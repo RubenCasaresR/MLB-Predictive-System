@@ -154,6 +154,23 @@ class PlayerStatsResponse(BaseModel):
     fatigue_score: Optional[float] = None
 
 
+class PitcherPreviewStats(BaseModel):
+    name: str = ""
+    throws: str = ""
+    fip: Optional[float] = None
+    k_per_9: Optional[float] = None
+    bb_per_9: Optional[float] = None
+    hr_per_9: Optional[float] = None
+    avg_velo: Optional[float] = None
+    whiff_pct: Optional[float] = None
+    fatigue_score: Optional[float] = None
+
+
+class BullpenPreviewStats(BaseModel):
+    era: Optional[float] = None
+    fip: Optional[float] = None
+
+
 class GamePreviewResponse(BaseModel):
     game_id: str
     game_date: str
@@ -170,6 +187,16 @@ class GamePreviewResponse(BaseModel):
     away_win_prob: Optional[float] = None
     sharp_money_flag: bool = False
     rlm_flag: bool = False
+    home_pitcher: PitcherPreviewStats = PitcherPreviewStats()
+    away_pitcher: PitcherPreviewStats = PitcherPreviewStats()
+    home_bullpen: BullpenPreviewStats = BullpenPreviewStats()
+    away_bullpen: BullpenPreviewStats = BullpenPreviewStats()
+    home_woba: Optional[float] = None
+    away_woba: Optional[float] = None
+    better_team: str = ""
+    better_pitcher: str = ""
+    better_bullpen: str = ""
+    better_offense: str = ""
 
 
 # ============================================================================

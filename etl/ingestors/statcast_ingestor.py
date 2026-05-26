@@ -81,6 +81,7 @@ class StatcastIngestor:
         params = {
             "date": game_date.isoformat(),
             "sportId": 1,
+            "hydrate": "probablePitcher",
         }
 
         logger.info(f"Fetching schedule for {game_date}")
@@ -181,6 +182,10 @@ class StatcastIngestor:
             about = play.get("about", {})
 
             count = play.get("count", {})
+            event = result.get("event")
+            is_ab = result.get("isOut") is not None
+            non_woba = event in ("intentional_walk", "sac_bunt", "sac_fly", "sac_fly_double_play",
+                                 "catcher_interference", "fielders_choice_out")
             return {
                 "ab_id": at_bat_index,
                 "game_id": game_id,
@@ -192,9 +197,12 @@ class StatcastIngestor:
                 "home_score_before": prev_home_score,
                 "away_score_before": prev_away_score,
                 "bases_code": self._get_bases_code(result.get("beforePitch", {})),
-                "events": result.get("event"),
+                "balls": count.get("balls"),
+                "strikes": count.get("strikes"),
+                "events": event,
                 "description": result.get("description"),
-                "is_ab": result.get("isOut") is not None,
+                "is_ab": is_ab,
+                "woba_denom": is_ab and not non_woba,
                 "launch_speed": result.get("launchSpeed"),
                 "launch_angle": result.get("launchAngle"),
                 "estimated_woba_using_speedangle": result.get("estimatedWobaUsingSpeedAngle"),
@@ -305,13 +313,22 @@ class StatcastIngestor:
                 at_bats_df.to_sql(
                     "at_bats_tmp", conn, if_exists="replace", index=False
                 )
-                conn.execute(text("""
-                    INSERT INTO at_bats
-                    SELECT * FROM at_bats_tmp
+                cols = [
+                    "ab_id", "game_id", "inning", "half_inning",
+                    "batter_id", "pitcher_id", "outs_before",
+                    "home_score_before", "away_score_before", "bases_code",
+                    "balls", "strikes", "events", "description",
+                    "is_ab", "woba_denom",
+                    "launch_speed", "launch_angle", "estimated_woba_using_speedangle",
+                    "home_score_after", "away_score_after",
+                ]
+                col_list = ", ".join(cols)
+                updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in ("events", "balls", "strikes", "home_score_after", "away_score_after"))
+                conn.execute(text(f"""
+                    INSERT INTO at_bats ({col_list})
+                    SELECT {col_list} FROM at_bats_tmp
                     ON CONFLICT (ab_id, game_id) DO UPDATE SET
-                        events = EXCLUDED.events,
-                        home_score_after = EXCLUDED.home_score_after,
-                        away_score_after = EXCLUDED.away_score_after
+                        {updates}
                 """))
                 conn.execute(text("DROP TABLE at_bats_tmp"))
             else:

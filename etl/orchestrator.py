@@ -69,6 +69,7 @@ class ETLOrchestrator:
             return
 
         from sqlalchemy import create_engine, text
+        import math
         engine = create_engine(self.db_url)
         with engine.begin() as conn:
             for _, game in games.iterrows():
@@ -76,6 +77,16 @@ class ETLOrchestrator:
                     text("SELECT stadium_id FROM stadiums WHERE team_id = :tid"),
                     {"tid": game["home_team_id"]},
                 ).scalar()
+                def _safe_int(val):
+                    if val is None:
+                        return None
+                    try:
+                        v = int(val)
+                        return v if v > 0 else None
+                    except (ValueError, TypeError, OverflowError):
+                        return None
+                hpp = _safe_int(game.get("home_probable_pitcher"))
+                app = _safe_int(game.get("away_probable_pitcher"))
                 conn.execute(
                     text("""
                         INSERT INTO games (game_id, game_date, season,
@@ -99,8 +110,8 @@ class ETLOrchestrator:
                         "status": game["status"],
                         "venue": venue_id,
                         "start": game.get("start_time_et"),
-                        "hpp": game.get("home_probable_pitcher"),
-                        "app": game.get("away_probable_pitcher"),
+                        "hpp": hpp,
+                        "app": app,
                     },
                 )
         logger.info(f"Loaded schedule: {len(games)} games")

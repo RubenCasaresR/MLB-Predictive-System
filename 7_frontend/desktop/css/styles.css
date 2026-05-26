@@ -990,6 +990,110 @@ table .text-center { text-align: center; }
 }
 .analysis-toggle, .props-toggle { width: 100%; justify-content: center; border-top: 1px solid var(--border); border-radius: 0; }
 
+/* Pitcher & bullpen stats in game cards */
+.game-card .pitcher-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: block;
+  margin-top: 2px;
+}
+.game-card .pitcher-name.tbd {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-weight: 400;
+}
+.game-card .pitcher-stats {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  display: block;
+  margin-top: 1px;
+}
+.game-card .bullpen-stats {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  display: block;
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+}
+
+/* Comparison details in game cards */
+.game-card .comparison-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+.comp-item {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  white-space: nowrap;
+}
+.comp-win { color: var(--accent-green); }
+.comp-loss { color: var(--accent-red); }
+
+/* Better team badge in game cards */
+.game-better-team {
+  margin-top: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+.better-home { background: rgba(59,130,246,0.1); color: var(--accent-blue); }
+.better-away { background: rgba(239,68,68,0.1); color: var(--accent-red); }
+
+/* Comparison bar in daily analysis */
+.analysis-comparison-bar {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+}
+.analysis-comparison-bar.better-home {
+  background: rgba(59,130,246,0.06);
+  border: 1px solid rgba(59,130,246,0.15);
+}
+.analysis-comparison-bar.better-away {
+  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239,68,68,0.15);
+}
+.comparison-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.comp-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.comp-side-right .comp-item { text-align: right; }
+.comp-vs {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  text-align: center;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+.comp-winner {
+  text-align: center;
+  font-size: 0.8rem;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
 /* Responsive mini */
 @media (max-width: 900px) {
   .sidebar { width: 56px; }

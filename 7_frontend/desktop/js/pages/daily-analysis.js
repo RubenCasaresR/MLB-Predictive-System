@@ -89,8 +89,60 @@ const DailyAnalysisPage = {
     });
   },
 
+  _comparisons(game) {
+    const hp = game.pitching_home || {};
+    const ap = game.pitching_away || {};
+    const hb = game.bullpen_home || {};
+    const ab = game.bullpen_away || {};
+    const ho = game.offensive_home || {};
+    const ao = game.offensive_away || {};
+
+    let betterPitcher = '';
+    if (hp.fip_30d != null && ap.fip_30d != null) {
+      betterPitcher = hp.fip_30d < ap.fip_30d ? 'home' : 'away';
+    }
+
+    let betterBullpen = '';
+    if (hb.bullpen_era_30d != null && ab.bullpen_era_30d != null) {
+      betterBullpen = hb.bullpen_era_30d < ab.bullpen_era_30d ? 'home' : 'away';
+    }
+
+    let betterOffense = '';
+    if (ho.woba_30d != null && ao.woba_30d != null) {
+      betterOffense = ho.woba_30d > ao.woba_30d ? 'home' : 'away';
+    }
+
+    let betterTeam = '';
+    if (game.home_win_prob > 0 || game.away_win_prob > 0) {
+      if (game.home_win_prob > game.away_win_prob) betterTeam = 'home';
+      else if (game.away_win_prob > game.home_win_prob) betterTeam = 'away';
+    } else {
+      const hWins = [betterPitcher, betterBullpen, betterOffense].filter(c => c === 'home').length;
+      const aWins = [betterPitcher, betterBullpen, betterOffense].filter(c => c === 'away').length;
+      if (hWins > aWins) betterTeam = 'home';
+      else if (aWins > hWins) betterTeam = 'away';
+    }
+
+    return { betterPitcher, betterBullpen, betterOffense, betterTeam };
+  }
+
+  _comparisonHtml(game, side, comp) {
+    if (!comp.betterTeam) return '';
+    const isMe = side === 'home';
+    const myTeam = isMe ? game.home_team_id : game.away_team_id;
+    const check = (cat) => comp[cat] === side;
+    const cross = (cat) => comp[cat] === (isMe ? 'away' : 'home');
+    const items = [
+      `<span class="comp-item ${check('betterPitcher') ? 'comp-win' : cross('betterPitcher') ? 'comp-loss' : ''}">${check('betterPitcher') ? '✅' : cross('betterPitcher') ? '❌' : '➖'} Abridor</span>`,
+      `<span class="comp-item ${check('betterBullpen') ? 'comp-win' : cross('betterBullpen') ? 'comp-loss' : ''}">${check('betterBullpen') ? '✅' : cross('betterBullpen') ? '❌' : '➖'} Bullpen</span>`,
+      `<span class="comp-item ${check('betterOffense') ? 'comp-win' : cross('betterOffense') ? 'comp-loss' : ''}">${check('betterOffense') ? '✅' : cross('betterOffense') ? '❌' : '➖'} Ofensiva</span>`,
+    ];
+    return `<div class="comparison-details">${items.join('')}</div>`;
+  }
+
   renderGameCard(game, idx) {
     const hasSim = game.home_win_prob > 0 || game.away_win_prob > 0;
+    const comp = this._comparisons(game);
     const favWinPct = hasSim ? (Math.max(game.home_win_prob, game.away_win_prob) * 100).toFixed(0) : '—';
     const underWinPct = hasSim ? (Math.min(game.home_win_prob, game.away_win_prob) * 100).toFixed(0) : '—';
     const favTeam = game.home_win_prob >= game.away_win_prob || !hasSim ? game.home_team_id : game.away_team_id;
@@ -163,6 +215,18 @@ const DailyAnalysisPage = {
       <div class="card analysis-card" style="margin-bottom:16px">
         <div class="analysis-card-header">
           ${matchupHtml}
+          ${hasSim && comp.betterTeam ? `
+          <div class="analysis-comparison-bar ${comp.betterTeam === 'home' ? 'better-home' : 'better-away'}">
+            <div class="comparison-row">
+              <div class="comp-side">${this._comparisonHtml(game, 'home', comp)}</div>
+              <div class="comp-vs">🏆 ${game.home_team_id} vs ${game.away_team_id}</div>
+              <div class="comp-side comp-side-right">${this._comparisonHtml(game, 'away', comp)}</div>
+            </div>
+            <div class="comp-winner">
+              🏆 Mejor equipo: <strong>${comp.betterTeam === 'home' ? game.home_team_name : game.away_team_name}</strong>
+            </div>
+          </div>
+          ` : ''}
         </div>
 
         ${hasRec ? `

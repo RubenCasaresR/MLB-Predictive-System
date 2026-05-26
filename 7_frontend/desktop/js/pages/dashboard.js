@@ -68,13 +68,26 @@ const DashboardPage = {
         const hasOdds = g.away_moneyline || g.home_moneyline;
 
         const logo = api.getTeamLogoHtml.bind(api);
+        const pitcherHtml = (pitcher) => {
+          if (!pitcher || !pitcher.name) return `<span class="pitcher-name tbd">P: TBD</span>`;
+          const parts = [];
+          if (pitcher.fip != null) parts.push(`FIP ${pitcher.fip.toFixed(2)}`);
+          if (pitcher.k_per_9 != null) parts.push(`K/9 ${pitcher.k_per_9.toFixed(1)}`);
+          if (pitcher.avg_velo != null) parts.push(`${pitcher.avg_velo.toFixed(1)}mph`);
+          return `
+            <span class="pitcher-name">P: ${pitcher.name} (${pitcher.throws || '?'})</span>
+            ${parts.length ? `<span class="pitcher-stats">${parts.join(' · ')}</span>` : ''}
+          `;
+        };
+        const hp = g.home_pitcher || {};
+        const ap = g.away_pitcher || {};
         return `
         <div class="card game-card" onclick="App.route('games')">
           <div class="game-time">${api.formatTimeTZ(g.start_time)} · ${isGameLive ? '<span class="badge badge-green">EN VIVO</span>' : g.status || 'SCHEDULED'}${g.venue ? ' · ' + g.venue : ''}</div>
           <div class="game-matchup">
             <div class="team-info">
               <div class="team-name">${logo(g.away_team)}</div>
-              <span class="pitcher">${g.away_pitcher_id || ''}</span>
+              ${pitcherHtml(ap)}
             </div>
             <div class="score-display" style="min-width:${showScore ? '70' : '50'}px">
               ${showScore ? `
@@ -85,7 +98,7 @@ const DashboardPage = {
             </div>
             <div class="team-info" style="text-align:right">
               <div class="team-name">${logo(g.home_team)}</div>
-              <span class="pitcher">${g.home_pitcher_id || ''}</span>
+              ${pitcherHtml(hp)}
             </div>
           </div>
           ${!showScore && hasOdds ? `

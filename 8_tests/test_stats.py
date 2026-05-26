@@ -149,13 +149,66 @@ def _make_mock_engine(fetchone_result=None, fetchall_result=None):
     """Create a mock engine that returns the given fetchone/fetchall results."""
     mock_engine = MagicMock()
     mock_conn = MagicMock()
-    mock_result = MagicMock()
+    mock_main_result = MagicMock()
     if fetchall_result is not None:
-        mock_result.fetchall.return_value = fetchall_result
-    mock_result.fetchone.return_value = fetchone_result
+        mock_main_result.fetchall.return_value = fetchall_result
+    mock_main_result.fetchone.return_value = fetchone_result
     mock_conn.__enter__.return_value = mock_conn
-    mock_conn.execute.return_value = mock_result
+
+    # Default execute returns the main result
+    mock_conn.execute.return_value = mock_main_result
     mock_engine.connect.return_value = mock_conn
+    return mock_engine
+
+
+def _make_mock_engine_with_extra(fetchone_result=None, fetchall_result=None,
+                                  pitcher_home_result=None, pitcher_away_result=None,
+                                  team_home_result=None, team_away_result=None):
+    """Create a mock engine that returns different results per query text pattern."""
+    from unittest.mock import MagicMock
+
+    mock_engine = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.__enter__.return_value = mock_conn
+    mock_engine.connect.return_value = mock_conn
+
+    def _execute_side_effect(*exec_args, **exec_kwargs):
+        sql = exec_args[0] if exec_args else None
+        params = exec_args[1] if len(exec_args) > 1 else (exec_kwargs or {})
+        sql_str = str(sql) if hasattr(sql, '__str__') else str(sql)
+        mock_res = MagicMock()
+        # Match pitcher query by looking at SQL text
+        if 'players p' in sql_str and 'player_rolling_stats' in sql_str:
+            pid = params.get('pid', 0) if isinstance(params, dict) else 0
+            if pid == 1:
+                mock_res.fetchone.return_value = pitcher_home_result or (
+                    'Gerrit Cole', 'R', 2.95, 10.2, 5.1, 1.2, 96.8, 30.5, 0.72
+                )
+            elif pid == 2:
+                mock_res.fetchone.return_value = pitcher_away_result or (
+                    'Clayton Kershaw', 'L', 3.45, 8.2, 7.3, 1.1, 91.2, 25.0, 0.85
+                )
+            else:
+                mock_res.fetchone.return_value = None
+        elif 'team_rolling_stats' in sql_str:
+            tid = params.get('tid', '') if isinstance(params, dict) else ''
+            if tid == 'NYY' and team_home_result:
+                mock_res.fetchone.return_value = team_home_result
+            elif tid == 'BOS' and team_away_result:
+                mock_res.fetchone.return_value = team_away_result
+            elif tid == 'LAD' and team_home_result:
+                mock_res.fetchone.return_value = team_home_result
+            elif tid == 'SFG' and team_away_result:
+                mock_res.fetchone.return_value = team_away_result
+            else:
+                mock_res.fetchone.return_value = None
+        else:
+            if fetchall_result is not None:
+                mock_res.fetchall.return_value = fetchall_result
+            mock_res.fetchone.return_value = fetchone_result
+        return mock_res
+
+    mock_conn.execute.side_effect = _execute_side_effect
     return mock_engine
 
 
@@ -269,8 +322,23 @@ class TestGetGamePreview:
         True,                   # rlm_flag
     )
 
+    PITCHER_HOME_ROW = (
+        "Gerrit Cole", "R", 2.95, 10.2, 5.1, 1.2, 96.8, 30.5, 0.72,
+    )
+    PITCHER_AWAY_ROW = (
+        "Clayton Kershaw", "L", 3.45, 8.2, 7.3, 1.1, 91.2, 25.0, 0.85,
+    )
+    TEAM_HOME_ROW = (3.42, 3.80, 0.335)
+    TEAM_AWAY_ROW = (4.12, 4.05, 0.312)
+
     def test_returns_game_preview_with_all_data(self):
-        engine = _make_mock_engine(fetchone_result=self.GAME_PREVIEW_ROW)
+        engine = _make_mock_engine_with_extra(
+            fetchone_result=self.GAME_PREVIEW_ROW,
+            pitcher_home_result=self.PITCHER_HOME_ROW,
+            pitcher_away_result=self.PITCHER_AWAY_ROW,
+            team_home_result=self.TEAM_HOME_ROW,
+            team_away_result=self.TEAM_AWAY_ROW,
+        )
         with patch("api.routers.stats.get_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview/2026-05-20-NYY-BOS")
 
@@ -288,6 +356,16 @@ class TestGetGamePreview:
         assert data["away_win_prob"] == 0.42
         assert data["sharp_money_flag"] is True
         assert data["rlm_flag"] is True
+        # New fields
+        assert data["home_pitcher"]["name"] == "Gerrit Cole"
+        assert data["home_pitcher"]["fip"] == 2.95
+        assert data["away_pitcher"]["name"] == "Clayton Kershaw"
+        assert data["home_bullpen"]["era"] == 3.42
+        assert data["away_bullpen"]["era"] == 4.12
+        assert data["better_team"] == "home"
+        assert data["better_pitcher"] == "home"
+        assert data["better_bullpen"] == "home"
+        assert data["better_offense"] == "home"
 
     def test_returns_404_when_game_not_found(self):
         engine = _make_mock_engine(fetchone_result=None)
@@ -301,7 +379,13 @@ class TestGetGamePreview:
         minimal_row = ("2026-05-21", "LAD", "SFG", None, None,
                        "SCHEDULED", "19:10", None, None, None,
                        0.0, 0.0, None, None)
-        engine = _make_mock_engine(fetchone_result=minimal_row)
+        engine = _make_mock_engine_with_extra(
+            fetchone_result=minimal_row,
+            pitcher_home_result=None,
+            pitcher_away_result=None,
+            team_home_result=None,
+            team_away_result=None,
+        )
         with patch("api.routers.stats.get_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview/2026-05-21-LAD-SFG")
 
@@ -312,11 +396,17 @@ class TestGetGamePreview:
         assert data["total"] is None
         assert data["sharp_money_flag"] is False
         assert data["rlm_flag"] is False
-        assert data["home_win_prob"] is None
-        assert data["away_win_prob"] is None
+        assert data["home_win_prob"] == 0.0
+        assert data["away_win_prob"] == 0.0
 
     def test_start_time_returned_when_present(self):
-        engine = _make_mock_engine(fetchone_result=self.GAME_PREVIEW_ROW)
+        engine = _make_mock_engine_with_extra(
+            fetchone_result=self.GAME_PREVIEW_ROW,
+            pitcher_home_result=self.PITCHER_HOME_ROW,
+            pitcher_away_result=self.PITCHER_AWAY_ROW,
+            team_home_result=self.TEAM_HOME_ROW,
+            team_away_result=self.TEAM_AWAY_ROW,
+        )
         with patch("api.routers.stats.get_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview/2026-05-20-NYY-BOS")
 
@@ -336,8 +426,23 @@ class TestListTodaysGames:
          -120, 100, 8.5, 0.58, 0.42, True, True),
     ]
 
+    PITCHER_HOME_ROW = (
+        "Gerrit Cole", "R", 2.95, 10.2, 5.1, 1.2, 96.8, 30.5, 0.72,
+    )
+    PITCHER_AWAY_ROW = (
+        "Clayton Kershaw", "L", 3.45, 8.2, 7.3, 1.1, 91.2, 25.0, 0.85,
+    )
+    TEAM_HOME_ROW = (3.42, 3.80, 0.335)
+    TEAM_AWAY_ROW = (4.12, 4.05, 0.312)
+
     def test_returns_games_for_given_date(self):
-        engine = _make_mock_engine(fetchall_result=self.TODAYS_GAMES_ROWS)
+        engine = _make_mock_engine_with_extra(
+            fetchall_result=self.TODAYS_GAMES_ROWS,
+            pitcher_home_result=self.PITCHER_HOME_ROW,
+            pitcher_away_result=self.PITCHER_AWAY_ROW,
+            team_home_result=self.TEAM_HOME_ROW,
+            team_away_result=self.TEAM_AWAY_ROW,
+        )
         with patch("api.routers.stats.get_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview?date=2026-05-20")
 
@@ -345,6 +450,9 @@ class TestListTodaysGames:
         data = resp.json()
         assert len(data) == 1
         assert data[0]["game_id"] == "2026-05-20-NYY-BOS"
+        assert data[0]["home_pitcher"]["name"] == "Gerrit Cole"
+        assert data[0]["home_bullpen"]["era"] == 3.42
+        assert data[0]["better_team"] == "home"
 
     def test_returns_empty_when_no_games_that_day(self):
         engine = _make_mock_engine(fetchall_result=[])
@@ -355,7 +463,13 @@ class TestListTodaysGames:
         assert resp.json() == []
 
     def test_games_have_expected_fields(self):
-        engine = _make_mock_engine(fetchall_result=self.TODAYS_GAMES_ROWS)
+        engine = _make_mock_engine_with_extra(
+            fetchall_result=self.TODAYS_GAMES_ROWS,
+            pitcher_home_result=self.PITCHER_HOME_ROW,
+            pitcher_away_result=self.PITCHER_AWAY_ROW,
+            team_home_result=self.TEAM_HOME_ROW,
+            team_away_result=self.TEAM_AWAY_ROW,
+        )
         with patch("api.routers.stats.get_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview?date=2026-05-20")
 
@@ -366,6 +480,10 @@ class TestListTodaysGames:
             assert "home_team" in g
             assert "away_team" in g
             assert "status" in g
+            assert "home_pitcher" in g
+            assert "away_bullpen" in g
+            assert "better_team" in g
+            assert "better_pitcher" in g
 
 
 # ============================================================================
