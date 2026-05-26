@@ -6,7 +6,7 @@
 # Coordina la ejecución de todos los procesos ETL en el orden correcto:
 #   1. Schedule: obtener juegos del día
 #   2. Statcast: play-by-play de juegos finalizados
-#   3. Weather: pronósticos para juegos próximos
+#   3. Weather: pronóstiñcos para juegos próximos
 #   4. Market: líneas de apuestas (loop continuo en ventana pre-game)
 #   5. Features: cómputo de estadísticas rolling
 #   6. Predicción: ejecutar Monte Carlo para juegos próximos
