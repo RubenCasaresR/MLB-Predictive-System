@@ -27,6 +27,16 @@ def _mock_engine(cursor):
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _override_auth():
+    """Override get_current_user for all tests in this module."""
+    from api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": 1, "username": "testuser"}
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
+
 # ============================================================================
 # ConnectionManager
 # ============================================================================

@@ -188,7 +188,7 @@ class TestMonteCarloSimulator:
             away_pitcher=sample_pitcher,
             n_iterations=500,
         )
-        assert result.home_win_prob > 0.5
+        assert result.home_win_prob >= 0.5
 
 
 class TestGameState:

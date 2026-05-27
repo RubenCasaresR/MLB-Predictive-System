@@ -36,12 +36,12 @@ class TestPipelineErrorHandling:
         def ok_step(_):
             call_log.append("ok_step")
 
-        monkeypatch.setattr(orch, "_load_schedule", fail_step)
-        monkeypatch.setattr(orch, "_ingest_statcast", ok_step)
-        monkeypatch.setattr(orch, "_ingest_weather", ok_step)
-        monkeypatch.setattr(orch, "_ingest_market", ok_step)
-        monkeypatch.setattr(orch, "_compute_features", ok_step)
-        monkeypatch.setattr(orch, "_run_predictions", ok_step)
+        monkeypatch.setattr(orch, "load_schedule", fail_step)
+        monkeypatch.setattr(orch, "ingest_statcast", ok_step)
+        monkeypatch.setattr(orch, "ingest_weather", ok_step)
+        monkeypatch.setattr(orch, "ingest_market", ok_step)
+        monkeypatch.setattr(orch, "compute_features", ok_step)
+        monkeypatch.setattr(orch, "run_predictions", ok_step)
 
         # Should not raise — step 1 fails, but pipeline continues
         orch.run_daily_pipeline(date(2026, 5, 20))
@@ -59,12 +59,12 @@ class TestPipelineErrorHandling:
             call_log.append("fail")
             raise RuntimeError("mid-step failure")
 
-        monkeypatch.setattr(orch, "_load_schedule", ok)
-        monkeypatch.setattr(orch, "_ingest_statcast", ok)
-        monkeypatch.setattr(orch, "_ingest_weather", fail)  # step 3 fails
-        monkeypatch.setattr(orch, "_ingest_market", ok)
-        monkeypatch.setattr(orch, "_compute_features", ok)
-        monkeypatch.setattr(orch, "_run_predictions", ok)
+        monkeypatch.setattr(orch, "load_schedule", ok)
+        monkeypatch.setattr(orch, "ingest_statcast", ok)
+        monkeypatch.setattr(orch, "ingest_weather", fail)  # step 3 fails
+        monkeypatch.setattr(orch, "ingest_market", ok)
+        monkeypatch.setattr(orch, "compute_features", ok)
+        monkeypatch.setattr(orch, "run_predictions", ok)
 
         orch.run_daily_pipeline(date(2026, 5, 20))
 
@@ -77,17 +77,17 @@ class TestPipelineErrorHandling:
         def ok(_):
             call_log.append("ok")
 
-        monkeypatch.setattr(orch, "_load_schedule", ok)
-        monkeypatch.setattr(orch, "_ingest_statcast", ok)
-        monkeypatch.setattr(orch, "_ingest_weather", ok)
-        monkeypatch.setattr(orch, "_ingest_market", ok)
-        monkeypatch.setattr(orch, "_compute_features", ok)
+        monkeypatch.setattr(orch, "load_schedule", ok)
+        monkeypatch.setattr(orch, "ingest_statcast", ok)
+        monkeypatch.setattr(orch, "ingest_weather", ok)
+        monkeypatch.setattr(orch, "ingest_market", ok)
+        monkeypatch.setattr(orch, "compute_features", ok)
 
         def fail_last(_):
             call_log.append("fail_last")
             raise RuntimeError("Last step failed")
 
-        monkeypatch.setattr(orch, "_run_predictions", fail_last)
+        monkeypatch.setattr(orch, "run_predictions", fail_last)
 
         orch.run_daily_pipeline(date(2026, 5, 20))
 
@@ -103,19 +103,19 @@ class TestPipelineErrorHandling:
 
             return fn
 
-        monkeypatch.setattr(orch, "_load_schedule", ok("load_schedule"))
-        monkeypatch.setattr(orch, "_ingest_statcast", ok("ingest_statcast"))
-        monkeypatch.setattr(orch, "_ingest_weather", ok("ingest_weather"))
-        monkeypatch.setattr(orch, "_ingest_market", ok("ingest_market"))
-        monkeypatch.setattr(orch, "_compute_features", ok("compute_features"))
-        monkeypatch.setattr(orch, "_run_predictions", ok("run_predictions"))
+        monkeypatch.setattr(orch, "load_schedule", ok("load_schedule"))
+        monkeypatch.setattr(orch, "ingest_statcast", ok("ingest_statcast"))
+        monkeypatch.setattr(orch, "ingest_weather", ok("ingest_weather"))
+        monkeypatch.setattr(orch, "ingest_market", ok("ingest_market"))
+        monkeypatch.setattr(orch, "compute_features", ok("compute_features"))
+        monkeypatch.setattr(orch, "run_predictions", ok("run_predictions"))
 
         orch.run_daily_pipeline(date(2026, 5, 20))
         assert len(call_log) == 6
 
 
 # ============================================================================
-# Tests: _load_schedule no data
+# Tests: load_schedule no data
 # ============================================================================
 
 
@@ -130,4 +130,4 @@ class TestLoadSchedule:
 
         monkeypatch.setattr(si.StatcastIngestor, "fetch_daily_games", mock_fetch)
         # Should not raise
-        orch._load_schedule(date(2026, 5, 20))
+        orch.load_schedule(date(2026, 5, 20))

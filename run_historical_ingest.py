@@ -98,9 +98,9 @@ def run_historical_ingest(
         try:
             if not skip_statcast:
                 logger.info("Loading schedule for %s", day_str)
-                orch._load_schedule(day)
+                orch.load_schedule(day)
                 logger.info("Ingesting Statcast for %s", day_str)
-                orch._ingest_statcast(day)
+                orch.ingest_statcast(day)
             else:
                 logger.info("Skipping Statcast for %s", day_str)
 
@@ -108,7 +108,7 @@ def run_historical_ingest(
 
             if not skip_weather:
                 logger.info("Ingesting weather for %s", day_str)
-                orch._ingest_weather(day)
+                orch.ingest_weather(day)
             else:
                 logger.info("Skipping weather for %s", day_str)
 

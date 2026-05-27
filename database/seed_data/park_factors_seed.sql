@@ -24,7 +24,7 @@ INSERT INTO stadiums (stadium_id, name, team_id, altitude_ft, capacity, pf_overa
     (17, 'PNC Park', 'PIT', 790, 38362, 0.99, 0.98, 1.00, 0.94),
     (18, 'Great American Ball Park', 'CIN', 510, 43359, 1.05, 1.06, 1.04, 1.14),
     (19, 'Kauffman Stadium', 'KCR', 760, 37400, 0.98, 0.97, 0.99, 0.91),
-    (20, 'Citi Field', 'NYM', 30, 41922, 0.97, 0.96, 0.98, 0.90)
+    (20, 'Citi Field', 'NYM', 30, 41922, 0.97, 0.96, 0.98, 0.90),
     (21, 'Nationals Park', 'WSN', 25, 41155, 0.99, 1.00, 0.99, 1.00),
     (22, 'Camden Yards', 'BAL', 30, 44970, 1.01, 1.02, 1.00, 1.03),
     (23, 'loanDepot park', 'MIA', 10, 36742, 0.98, 0.97, 0.99, 0.93),

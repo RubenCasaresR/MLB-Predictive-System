@@ -486,8 +486,8 @@ class MonteCarloMLBSimulator:
         progress_callback: Callable | None = None,
     ) -> SimulationResult:
 
-        bp_home = self._make_bullpen_state(away_pitcher, home_bullpen_fip_30d)
-        bp_away = self._make_bullpen_state(home_pitcher, away_bullpen_fip_30d)
+        bp_home = self._make_bullpen_state(home_pitcher, home_bullpen_fip_30d)
+        bp_away = self._make_bullpen_state(away_pitcher, away_bullpen_fip_30d)
 
         ctx = dict(
             stadium_id=stadium_id,

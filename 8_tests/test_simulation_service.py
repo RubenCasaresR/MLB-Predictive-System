@@ -14,7 +14,7 @@ from api.models.pydantic_models import SimulationRequest, SimulationResponse
 from api.services.simulation_service import SimulationService
 
 SAMPLE_REQUEST = SimulationRequest(
-    game_id="2026-05-20-NYY-BOS",
+    game_id="GAME-260520",
     home_team_id="NYY",
     away_team_id="BOS",
     home_pitcher_id=1,
@@ -124,7 +124,7 @@ class TestRunSimulation:
         self._teardown()
 
         assert isinstance(response, SimulationResponse)
-        assert response.game_id == "2026-05-20-NYY-BOS"
+        assert response.game_id == "GAME-260520"
         assert response.home_win_prob == 0.55
         assert response.away_win_prob == 0.45
         assert response.mean_home_runs == 4.5
@@ -138,7 +138,7 @@ class TestRunSimulation:
     def test_caches_result(self):
         self._setup()
         response = self._run()
-        cached = self.svc.get_cached("2026-05-20-NYY-BOS")
+        cached = self.svc.get_cached("GAME-260520")
         self._teardown()
 
         assert cached is response
@@ -153,6 +153,16 @@ class TestRunSimulation:
 
     def test_run_simulation_called_with_correct_args(self):
         self._setup()
+        self.svc._fetch_game_context = MagicMock(return_value={
+            "pf_hr": 1.05, "pf_woba": 1.0, "pf_k": 1.0,
+            "temperature": 70, "wind_speed": 0, "wind_direction": "NONE",
+            "umpire_cs_rate": 0, "stadium_id": 0, "umpire_id": 0,
+            "home_bp_era": 4.5, "home_bp_fip": 4.5,
+            "away_bp_era": 4.5, "away_bp_fip": 4.5,
+            "home_rest_days": 4, "away_rest_days": 4,
+            "home_travel_miles": 0, "away_travel_miles": 0,
+            "home_tz_crossings": 0, "away_tz_crossings": 0,
+        })
         self._run()
         self._teardown()
 
@@ -262,24 +272,28 @@ class TestDatabaseInteraction:
             p.__exit__(None, None, None)
 
     def test_fetches_lineups_with_correct_args(self):
+        from datetime import date
+        from unittest.mock import ANY
+
         self._setup()
-        _MOCK_CONFIG.DATABASE_URL = "sqlite://"
         run_async(self.svc.run_simulation(SAMPLE_REQUEST))
         self._teardown()
 
         engine = self.mock_engine.return_value
-        self.mock_fetch_lineup.assert_any_call(engine, "NYY", "2026-05-20")
-        self.mock_fetch_lineup.assert_any_call(engine, "BOS", "2026-05-20")
+        self.mock_fetch_lineup.assert_any_call(engine, "NYY", date(2026, 5, 20))
+        self.mock_fetch_lineup.assert_any_call(engine, "BOS", date(2026, 5, 20))
 
     def test_fetches_pitchers_with_correct_args(self):
+        from datetime import date
+        from unittest.mock import ANY
+
         self._setup()
-        _MOCK_CONFIG.DATABASE_URL = "sqlite://"
         run_async(self.svc.run_simulation(SAMPLE_REQUEST))
         self._teardown()
 
         engine = self.mock_engine.return_value
-        self.mock_fetch_pitcher.assert_any_call(engine, 1, "2026-05-20")
-        self.mock_fetch_pitcher.assert_any_call(engine, 2, "2026-05-20")
+        self.mock_fetch_pitcher.assert_any_call(engine, 1, date(2026, 5, 20))
+        self.mock_fetch_pitcher.assert_any_call(engine, 2, date(2026, 5, 20))
 
 
 class TestRunDistributionKeys:

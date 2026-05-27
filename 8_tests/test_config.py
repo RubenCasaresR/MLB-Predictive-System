@@ -38,8 +38,10 @@ class TestDBConfig:
     def test_default_user(self):
         assert cfg.DB_CONFIG["user"] == "mlb_user"
 
-    def test_default_password(self):
-        assert cfg.DB_CONFIG["password"] == ""
+    def test_default_password(self, monkeypatch):
+        monkeypatch.setenv("MLB_DB_PASSWORD", "")
+        c = _reload_config()
+        assert c.DB_CONFIG["password"] == ""
 
     def test_database_url_contains_components(self):
         assert "postgresql://" in cfg.DATABASE_URL
@@ -84,6 +86,8 @@ class TestDBConfig:
         monkeypatch.setenv("MLB_DB_USER", "svc_user")
         monkeypatch.setenv("MLB_DB_PASSWORD", "pw")
         monkeypatch.delenv("DATABASE_URL", raising=False)
+        import dotenv
+        monkeypatch.setattr(dotenv, "load_dotenv", lambda: None)
         c = _reload_config()
         assert c.DATABASE_URL == "postgresql://svc_user:pw@db.example.com:6432/mlb_prod"
 
@@ -103,11 +107,15 @@ class TestAPIConfig:
     def test_odds_base_url(self):
         assert cfg.ODDS_BASE_URL == "https://api.the-odds-api.com/v4"
 
-    def test_weather_api_key_default(self):
-        assert cfg.WEATHER_API_KEY == ""
+    def test_weather_api_key_default(self, monkeypatch):
+        monkeypatch.setenv("WEATHER_API_KEY", "")
+        c = _reload_config()
+        assert c.WEATHER_API_KEY == ""
 
-    def test_odds_api_key_default(self):
-        assert cfg.ODDS_API_KEY == ""
+    def test_odds_api_key_default(self, monkeypatch):
+        monkeypatch.setenv("ODDS_API_KEY", "")
+        c = _reload_config()
+        assert c.ODDS_API_KEY == ""
 
     def test_weather_api_key_override(self, monkeypatch):
         monkeypatch.setenv("WEATHER_API_KEY", "wx-key-123")

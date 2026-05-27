@@ -53,6 +53,9 @@ def _create_tables(engine):
                 avg_spin_30d REAL,
                 days_rested INTEGER,
                 pitches_last_7d INTEGER,
+                k_per_9_30d REAL,
+                bb_per_9_30d REAL,
+                fip_30d REAL,
                 UNIQUE(player_id, game_id)
             )
         """)

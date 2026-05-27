@@ -120,7 +120,6 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterSt
                 SELECT brs.player_id, brs.woba_30d, brs.k_pct_30d,
                        brs.bb_pct_30d, brs.hr_per_9_30d,
                        brs.groundball_pct_30d, brs.flyball_pct_30d,
-                       brs.slg_30d, brs.hard_hit_pct_30d, brs.barrel_pct_30d,
                        p.bats, p.full_name
                 FROM batter_rolling_stats brs
                 JOIN players p ON p.player_id = brs.player_id
@@ -147,9 +146,6 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterSt
         hr_per_9,
         gb_pct,
         fb_pct,
-        slg_30d,
-        hard_hit_pct,
-        barrel_pct,
         bats,
         name,
     ) in rows:
@@ -159,9 +155,6 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterSt
         hr_rate = float(hr_per_9) if hr_per_9 is not None else _LEAGUE_AVG_HR_RATE
         gb_rate = (float(gb_pct) if gb_pct is not None else _LEAGUE_AVG_GB_RATE * 100) / 100.0
         fb_rate = (float(fb_pct) if fb_pct is not None else _LEAGUE_AVG_FB_RATE * 100) / 100.0
-        slg_val = float(slg_30d) if slg_30d is not None else 0.400
-        hh_val = float(hard_hit_pct) if hard_hit_pct is not None else 38.0
-        bar_val = float(barrel_pct) if barrel_pct is not None else 8.0
 
         woba_vs = float(woba_30d) if woba_30d is not None else _LEAGUE_AVG_WOBA
         lineups.append(
@@ -179,9 +172,6 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterSt
                 woba_30d=round(woba_vs, 3),
                 k_pct_30d=round(k_rate * 100, 1),
                 bb_pct_30d=round(bb_rate * 100, 1),
-                slg_30d=round(slg_val, 3),
-                hard_hit_pct_30d=round(hh_val, 1),
-                barrel_pct_30d=round(bar_val, 1),
             )
         )
 

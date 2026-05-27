@@ -74,12 +74,12 @@ class ETLOrchestrator:
         completed = self._load_checkpoint(checkpoint_file)
 
         steps = [
-            ("load_schedule", "Loading game schedule", self._load_schedule),
-            ("ingest_statcast", "Ingesting Statcast play-by-play", self._ingest_statcast),
-            ("ingest_weather", "Ingesting weather data", self._ingest_weather),
-            ("ingest_market", "Ingesting market data", self._ingest_market),
-            ("compute_features", "Computing rolling features", self._compute_features),
-            ("run_predictions", "Running predictions", self._run_predictions),
+            ("load_schedule", "Loading game schedule", self.load_schedule),
+            ("ingest_statcast", "Ingesting Statcast play-by-play", self.ingest_statcast),
+            ("ingest_weather", "Ingesting weather data", self.ingest_weather),
+            ("ingest_market", "Ingesting market data", self.ingest_market),
+            ("compute_features", "Computing rolling features", self.compute_features),
+            ("run_predictions", "Running predictions", self.run_predictions),
         ]
 
         for i, (step_name, label, method) in enumerate(steps, 1):
@@ -102,7 +102,7 @@ class ETLOrchestrator:
         self._clean_checkpoint(checkpoint_file)
         logger.info(f"=== Pipeline complete for {target_date} ===")
 
-    def _load_schedule(self, target_date: date):
+    def load_schedule(self, target_date: date):
         from etl.ingestors.statcast_ingestor import StatcastIngestor
 
         ingestor = StatcastIngestor(self.db_url)
@@ -352,19 +352,19 @@ class ETLOrchestrator:
 
         logger.info(f"Enriched metadata for {len(games_today)} games")
 
-    def _ingest_statcast(self, target_date: date):
+    def ingest_statcast(self, target_date: date):
         from etl.ingestors.statcast_ingestor import StatcastIngestor
 
         ingestor = StatcastIngestor(self.db_url)
         ingestor.ingest_date_range(target_date, target_date)
 
-    def _ingest_weather(self, target_date: date):
+    def ingest_weather(self, target_date: date):
         from etl.ingestors.weather_ingestor import WeatherIngestor
 
         ingestor = WeatherIngestor(self.db_url)
         ingestor.ingest_team_games(target_date)
 
-    def _ingest_market(self, target_date: date):
+    def ingest_market(self, target_date: date):
         from etl.config import ODDS_API_KEY
         from etl.ingestors.market_ingestor import MarketIngestor
 
@@ -379,13 +379,13 @@ class ETLOrchestrator:
             "premium direct sportsbook API (e.g., Kambi, IFS). Skipping."
         )
 
-    def _compute_features(self, target_date: date):
+    def compute_features(self, target_date: date):
         from prediction.feature_pipeline import FeaturePipeline
 
         pipeline = FeaturePipeline(self.db_url)
         pipeline.run_full_pipeline(target_date)
 
-    def _run_predictions(self, target_date: date):
+    def run_predictions(self, target_date: date):
         import numpy as np
         from sqlalchemy import create_engine, text
 

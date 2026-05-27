@@ -117,7 +117,7 @@ class TestParseAtBat:
 class TestParsePitch:
     def test_parse_fastball(self, ingestor):
         pitch_data = SAMPLE_PLAY["playEvents"][0]
-        pitch = ingestor._parse_pitch(pitch_data, ab_id=1)
+        pitch = ingestor._parse_pitch(pitch_data, ab_id=1, game_id="2026-05-20-NYY-BOS")
         assert pitch is not None
         assert pitch["ab_id"] == 1
         assert pitch["pitch_number"] == 1
@@ -139,12 +139,12 @@ class TestParsePitch:
     def test_parse_whiff(self, ingestor):
         pitch_data = json.loads(json.dumps(SAMPLE_PLAY["playEvents"][0]))
         pitch_data["details"]["isSwingAndMiss"] = True
-        pitch = ingestor._parse_pitch(pitch_data, ab_id=1)
+        pitch = ingestor._parse_pitch(pitch_data, ab_id=1, game_id="2026-05-20-NYY-BOS")
         assert pitch["whiff"] is True
 
     def test_parse_non_pitch_event(self, ingestor):
         pitch_data = {"isPitch": False}
-        pitch = ingestor._parse_pitch(pitch_data, ab_id=1)
+        pitch = ingestor._parse_pitch(pitch_data, ab_id=1, game_id="2026-05-20-NYY-BOS")
         if pitch is not None:
             assert pitch.get("pitch_type") is None
 
@@ -239,6 +239,7 @@ class TestLoadToDatabase:
                 CREATE TABLE IF NOT EXISTS pitches (
                     pitch_id INTEGER PRIMARY KEY,
                     ab_id INTEGER,
+                    game_id TEXT,
                     release_speed REAL
                 )
             """)

@@ -593,6 +593,9 @@ DECLARE
     discrepancy DECIMAL;
 BEGIN
     -- Sharp Money: dinero significativamente diferente al volumen de boletos
+    IF p_ticket_pct IS NULL OR p_money_pct IS NULL THEN
+        RETURN NULL;
+    END IF;
     discrepancy := ABS(p_ticket_pct - p_money_pct);
     RETURN discrepancy >= p_threshold;
 END;
@@ -609,6 +612,9 @@ CREATE OR REPLACE FUNCTION detect_rlm(
 BEGIN
     -- RLM: el público apuesta mayoritario a un lado (ticket%)
     -- pero el dinero o la línea se mueven en dirección contraria
+    IF p_ticket_pct IS NULL OR p_money_pct IS NULL THEN
+        RETURN NULL;
+    END IF;
     IF p_ticket_pct > 50 AND p_money_pct < 50 THEN
         -- Público en Team A, dinero en Team B
         IF line_current < line_previous THEN

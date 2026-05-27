@@ -236,6 +236,16 @@ class TestLoadToDb:
                 )
             """)
             )
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS games (
+                    game_id TEXT PRIMARY KEY
+                )
+            """)
+            )
+            conn.execute(
+                text("INSERT OR IGNORE INTO games (game_id) VALUES ('2026-05-20-NYY-BOS')")
+            )
         parsed = {
             "games": [
                 {

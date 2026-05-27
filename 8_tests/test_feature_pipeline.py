@@ -57,7 +57,11 @@ def _create_tables(engine):
                 events TEXT,
                 inning INTEGER,
                 half_inning TEXT,
-                launch_angle REAL
+                launch_angle REAL,
+                away_score_before INTEGER,
+                away_score_after INTEGER,
+                home_score_before INTEGER,
+                home_score_after INTEGER
             )
         """)
         )
@@ -83,6 +87,9 @@ def _create_tables(engine):
                 woba_14d REAL,
                 woba_30d REAL,
                 fip_30d REAL,
+                k_per_9_30d REAL,
+                bb_per_9_30d REAL,
+                hr_per_9_30d REAL,
                 avg_velo_30d REAL,
                 whiff_pct_30d REAL,
                 days_rested INTEGER,
@@ -117,6 +124,8 @@ def _create_tables(engine):
                 game_id TEXT NOT NULL,
                 as_of_date TEXT,
                 woba_30d REAL,
+                bullpen_era_30d REAL,
+                bullpen_fip_30d REAL,
                 UNIQUE(team_id, game_id)
             )
         """)
@@ -141,10 +150,10 @@ def _seed_at_bats(engine):
             text("""
             INSERT INTO at_bats (ab_id, game_id, pitcher_id, batter_id, events, inning, half_inning)
             VALUES
-                (1, '2026-05-19-NYY-BOS', 100, 1, 'single', 1, 'T'),
-                (2, '2026-05-19-NYY-BOS', 100, 2, 'home_run', 2, 'T'),
-                (3, '2026-05-19-NYY-BOS', 200, 3, 'strikeout', 1, 'B'),
-                (4, '2026-05-19-NYY-BOS', 200, 4, 'walk', 2, 'B')
+                (1, '2026-05-19-NYY-BOS', 100, 1, 'Single', 1, 'T'),
+                (2, '2026-05-19-NYY-BOS', 100, 2, 'Home Run', 2, 'T'),
+                (3, '2026-05-19-NYY-BOS', 200, 3, 'Strikeout', 1, 'B'),
+                (4, '2026-05-19-NYY-BOS', 200, 4, 'Walk', 2, 'B')
         """)
         )
 
@@ -217,12 +226,12 @@ def pipeline_with_batter_angles():
             text("""
             INSERT INTO at_bats (ab_id, game_id, pitcher_id, batter_id, events, inning, half_inning, launch_angle)
             VALUES
-                (1, '2026-05-19-NYY-BOS', 100, 1, 'single', 1, 'T', 8.0),
-                (2, '2026-05-19-NYY-BOS', 100, 2, 'home_run', 2, 'T', 30.0),
-                (3, '2026-05-19-NYY-BOS', 200, 3, 'strikeout', 1, 'B', NULL),
-                (4, '2026-05-19-NYY-BOS', 200, 4, 'walk', 2, 'B', NULL),
-                (5, '2026-05-19-NYY-BOS', 100, 1, 'field_out', 3, 'T', 5.0),
-                (6, '2026-05-19-NYY-BOS', 100, 2, 'flyout', 4, 'T', 40.0)
+                (1, '2026-05-19-NYY-BOS', 100, 1, 'Single', 1, 'T', 8.0),
+                (2, '2026-05-19-NYY-BOS', 100, 2, 'Home Run', 2, 'T', 30.0),
+                (3, '2026-05-19-NYY-BOS', 200, 3, 'Strikeout', 1, 'B', NULL),
+                (4, '2026-05-19-NYY-BOS', 200, 4, 'Walk', 2, 'B', NULL),
+                (5, '2026-05-19-NYY-BOS', 100, 1, 'Field Out', 3, 'T', 5.0),
+                (6, '2026-05-19-NYY-BOS', 100, 2, 'Fly Out', 4, 'T', 40.0)
         """)
         )
     _seed_pitches(engine)

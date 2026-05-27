@@ -279,17 +279,21 @@ class TestPublicEndpoints:
     def test_root(self):
         resp = TestClient(app).get("/")
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["name"] == "MLB Predictive System"
-        assert "docs" in data
+        assert "text/html" in resp.headers["content-type"]
 
     def test_alerts_list(self):
-        resp = TestClient(app).get("/api/v1/alerts/")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "alerts" in data
-        assert "total" in data
-        assert "unread_count" in data
+        from api.auth import get_current_user
+
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": 1, "username": "testuser"}
+        try:
+            resp = TestClient(app).get("/api/v1/alerts/")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "alerts" in data
+            assert "total" in data
+            assert "unread_count" in data
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
 
 
 class TestBetsProtected:
