@@ -390,7 +390,11 @@ class ETLOrchestrator:
         from sqlalchemy import create_engine, text
 
         from prediction.monte_carlo_simulator import MonteCarloMLBSimulator
-        from prediction.player_state_builder import build_player_states_from_db
+        from prediction.player_state_builder import (
+            IncompleteLineupError,
+            build_player_states_from_db,
+            fetch_league_avg_probs,
+        )
 
         engine = create_engine(self.db_url)
 
@@ -411,20 +415,25 @@ class ETLOrchestrator:
             logger.info(f"No upcoming games on {target_date} for prediction")
             return
 
-        sim = MonteCarloMLBSimulator(seed=42)
+        league_probs = fetch_league_avg_probs(engine)
+        sim = MonteCarloMLBSimulator(seed=42, league_avg_probs=league_probs)
 
         for game_id, home_team, away_team, home_p_id, away_p_id in upcoming:
             logger.info(f"Simulating {home_team} vs {away_team} ({game_id})")
 
-            home_lineup, away_lineup, home_pitcher, away_pitcher = build_player_states_from_db(
-                engine,
-                game_id,
-                home_team,
-                away_team,
-                home_p_id,
-                away_p_id,
-                target_date,
-            )
+            try:
+                home_lineup, away_lineup, home_pitcher, away_pitcher = build_player_states_from_db(
+                    engine,
+                    game_id,
+                    home_team,
+                    away_team,
+                    home_p_id,
+                    away_p_id,
+                    target_date,
+                )
+            except IncompleteLineupError as e:
+                logger.warning(f"Skipping {game_id}: {e}")
+                continue
 
             # Read all game factors from the materialized view + direct queries
             with engine.connect() as conn:
@@ -497,6 +506,20 @@ class ETLOrchestrator:
             away_bp_fip = float(abpf) if abpf else 4.50
             stadium_id = int(game_info[0]) if game_info and game_info[0] else 0
             umpire_id = int(game_info[1]) if game_info and game_info[1] else 0
+
+            # Neutralizar clima si el estadio tiene domo o techo retráctil
+            if stadium_id:
+                with engine.connect() as roof_conn:
+                    roof = roof_conn.execute(
+                        text("SELECT roof_type FROM stadiums WHERE stadium_id = :sid"),
+                        {"sid": stadium_id},
+                    ).scalar()
+                if roof in ("dome", "retractable"):
+                    temp = 72.0
+                    wind_spd = 0.0
+                    wind_dir = "NONE"
+                    logger.info(f"Neutralized weather for domed stadium (game {game_id})")
+
             home_rest = int(f.home_rest_days) if f and f.home_rest_days else 4
             away_rest = int(f.away_rest_days) if f and f.away_rest_days else 4
             away_tz = int(f.away_tz_crossings) if f and f.away_tz_crossings else 0

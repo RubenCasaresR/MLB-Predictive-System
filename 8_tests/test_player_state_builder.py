@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, text
 
 from prediction.monte_carlo_simulator import BatterState, PitcherState
 from prediction.player_state_builder import (
+    IncompleteLineupError,
     _fetch_pitcher_state,
     _fetch_team_lineup,
     build_player_states_from_db,
@@ -228,7 +229,7 @@ class TestFetchPitcherState:
 
 
 class TestFetchTeamLineup:
-    def test_with_lineups_table(self, engine, sample_date):
+    def test_partial_lineup_raises_error(self, engine, sample_date):
         with engine.begin() as conn:
             conn.execute(
                 text("""
@@ -259,16 +260,10 @@ class TestFetchTeamLineup:
             """)
             )
 
-        lineup = _fetch_team_lineup(engine, "NYY", sample_date)
-        assert len(lineup) == 9
-        assert lineup[0].player_id == 1
-        assert lineup[0].bats == "L"
-        assert lineup[0].woba_vs_rhp == 0.38
-        assert lineup[0].k_rate == 0.2
-        assert lineup[1].player_id == 2
-        assert lineup[2].player_id == 3
+        with pytest.raises(IncompleteLineupError):
+            _fetch_team_lineup(engine, "NYY", sample_date)
 
-    def test_empty_no_lineups(self, engine, sample_date):
+    def test_empty_no_lineups_raises_error(self, engine, sample_date):
         with engine.begin() as conn:
             conn.execute(
                 text("""
@@ -276,11 +271,10 @@ class TestFetchTeamLineup:
                 VALUES (1, 'Batter A', 'NYY', 'L')
             """)
             )
-        lineup = _fetch_team_lineup(engine, "NYY", sample_date)
-        assert len(lineup) == 9  # fills with league avg placeholders
-        assert lineup[0].player_id < 0  # placeholder ids are negative
+        with pytest.raises(IncompleteLineupError):
+            _fetch_team_lineup(engine, "NYY", sample_date)
 
-    def test_with_stats_only_latest(self, engine, sample_date):
+    def test_single_batter_lineup_raises_error(self, engine, sample_date):
         with engine.begin() as conn:
             conn.execute(
                 text("""
@@ -303,10 +297,30 @@ class TestFetchTeamLineup:
             """)
             )
 
-        lineup = _fetch_team_lineup(engine, "NYY", sample_date)
-        assert len(lineup) == 9  # 1 real + 8 league avg placeholders
-        assert lineup[0].woba_vs_rhp == 0.4
+        with pytest.raises(IncompleteLineupError):
+            _fetch_team_lineup(engine, "NYY", sample_date)
 
+    def test_full_lineup_returns_all_batters(self, engine, sample_date):
+        with engine.begin() as conn:
+            for i in range(9):
+                conn.execute(
+                    text("""
+                        INSERT INTO players (player_id, full_name, team_id, bats)
+                        VALUES (:pid, :name, 'NYY', 'R')
+                    """),
+                    {"pid": i + 1, "name": f"Batter_{i + 1}"},
+                )
+                conn.execute(
+                    text("""
+                        INSERT INTO lineups (game_id, team_id, player_id, batting_order, position)
+                        VALUES ('20260520-NYY-BOS', 'NYY', :pid, :order, 'DH')
+                    """),
+                    {"pid": i + 1, "order": i + 1},
+                )
+
+        lineup = _fetch_team_lineup(engine, "NYY", sample_date)
+        assert len(lineup) == 9
+        assert all(b.player_id > 0 for b in lineup)
 
 
 
@@ -317,24 +331,19 @@ class TestFetchTeamLineup:
 
 
 class TestBuildPlayerStatesFromDb:
-    def test_all_fallbacks(self, engine, sample_date):
-        home_l, away_l, home_p, away_p = build_player_states_from_db(
-            engine,
-            "G1",
-            "NYY",
-            "BOS",
-            100,
-            200,
-            sample_date,
-        )
-        assert len(home_l) == 9
-        assert len(away_l) == 9
-        assert home_p.player_id == 100
-        assert away_p.player_id == 200
-        assert home_p.k_rate == 0.225
-        assert all(b.woba_vs_rhp == 0.310 for b in home_l)
+    def test_all_fallbacks_raises_error(self, engine, sample_date):
+        with pytest.raises(IncompleteLineupError):
+            build_player_states_from_db(
+                engine,
+                "G1",
+                "NYY",
+                "BOS",
+                100,
+                200,
+                sample_date,
+            )
 
-    def test_with_real_pitcher_and_placeholder_batters(self, engine, sample_date):
+    def test_with_real_pitcher_raises_when_lineup_missing(self, engine, sample_date):
         with engine.begin() as conn:
             conn.execute(
                 text("""
@@ -351,28 +360,25 @@ class TestBuildPlayerStatesFromDb:
             """)
             )
 
-        home_l, away_l, home_p, away_p = build_player_states_from_db(
-            engine,
-            "G1",
-            "NYY",
-            "BOS",
-            100,
-            200,
-            sample_date,
-        )
-        assert home_p.k_rate == 0.3
-        assert home_p.whiff_pct == 0.15
-        assert home_p.avg_velo == 97.5
-        assert len(home_l) == 9
+        with pytest.raises(IncompleteLineupError):
+            build_player_states_from_db(
+                engine,
+                "G1",
+                "NYY",
+                "BOS",
+                100,
+                200,
+                sample_date,
+            )
 
-    def test_placeholder_uses_league_avg_woba(self, engine, sample_date):
-        home_l, _, _, _ = build_player_states_from_db(
-            engine,
-            "G1",
-            "NYY",
-            "BOS",
-            100,
-            200,
-            sample_date,
-        )
-        assert all(b.woba_vs_rhp == 0.310 for b in home_l)
+    def test_missing_lineup_raises_error(self, engine, sample_date):
+        with pytest.raises(IncompleteLineupError):
+            build_player_states_from_db(
+                engine,
+                "G1",
+                "NYY",
+                "BOS",
+                100,
+                200,
+                sample_date,
+            )

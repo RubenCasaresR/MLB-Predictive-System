@@ -4,11 +4,51 @@ import logging
 from datetime import date
 from typing import List, Tuple
 
+import numpy as np
 from sqlalchemy import create_engine, text
 
 from prediction.monte_carlo_simulator import BatterState, PitcherState
 
 logger = logging.getLogger(__name__)
+
+
+class IncompleteLineupError(Exception):
+    """Se lanza cuando un equipo no tiene los 9 bateadores confirmados en el lineup."""
+    pass
+
+
+def fetch_league_avg_probs(engine) -> np.ndarray | None:
+    """Consulta la BD y calcula probabilidades promedio reales de la liga (últimos 30 días)."""
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("""
+                    SELECT
+                        COALESCE(AVG(prs.k_per_9_30d) / 27.0, 0.225) AS league_k_rate,
+                        COALESCE(AVG(prs.bb_per_9_30d) / 27.0, 0.085) AS league_bb_rate,
+                        COALESCE(AVG(prs.hr_per_9_30d) / 27.0, 0.030) AS league_hr_rate
+                    FROM player_rolling_stats prs
+                    WHERE prs.k_per_9_30d IS NOT NULL
+                      AND prs.as_of_date >= CURRENT_DATE - 30
+                """),
+            ).fetchone()
+        k_rate = float(row[0]) if row and row[0] else 0.225
+        bb_rate = float(row[1]) if row and row[1] else 0.085
+        hr_rate = float(row[2]) if row and row[2] else 0.030
+
+        single_rate = 0.155
+        double_rate = 0.045
+        triple_rate = 0.005
+        hbp_rate = 0.010
+        sac_rate = 0.045
+        out_rate = max(0.0, 1.0 - k_rate - bb_rate - hr_rate - single_rate - double_rate - triple_rate - hbp_rate - sac_rate)
+
+        probs = np.array([out_rate, single_rate, double_rate, triple_rate, hr_rate, bb_rate, hbp_rate, sac_rate])
+        return probs / probs.sum()
+    except Exception as e:
+        logger.warning(f"Could not fetch league avg probs from DB: {e}")
+        return None
+
 
 # Valores por defecto liga
 _LEAGUE_AVG_WOBA = 0.310
@@ -181,25 +221,10 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterSt
         )
 
     if len(lineups) < 9:
-        needed = 9 - len(lineups)
-        for i in range(needed):
-            idx = len(lineups) + i
-            lineups.append(
-                BatterState(
-                    player_id=-(hash(team_id) % 10000 + idx),
-                    name=f"{team_id}_Fill_{idx + 1}",
-                    bats=("L" if idx % 3 == 0 else "R"),
-                    woba_vs_rhp=round(_LEAGUE_AVG_WOBA, 3),
-                    woba_vs_lhp=round(_LEAGUE_AVG_WOBA * 0.95, 3),
-                    woba_30d=round(_LEAGUE_AVG_WOBA, 3),
-                    k_pct_30d=_LEAGUE_AVG_K_RATE * 100,
-                    bb_pct_30d=_LEAGUE_AVG_BB_RATE * 100,
-                    slg_30d=0.400,
-                    hard_hit_pct_30d=38.0,
-                    barrel_pct_30d=8.0,
-                )
-            )
-        logger.info(f"Filled {needed} league-average batters for {team_id} lineup")
+        raise IncompleteLineupError(
+            f"Team {team_id} has only {len(lineups)} confirmed batters "
+            f"on {target_date} (need 9)"
+        )
 
     return lineups
 

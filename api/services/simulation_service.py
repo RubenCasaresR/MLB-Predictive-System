@@ -10,44 +10,19 @@ import logging
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
+import numpy as np
+from fastapi import HTTPException
+
 from api.models.pydantic_models import SimulationRequest, SimulationResponse
 
 logger = logging.getLogger(__name__)
 
 
 def _fetch_league_avg_probs(sync_engine) -> np.ndarray | None:
-    try:
-        import numpy as np
-        from sqlalchemy import text
+    """Delega en la función compartida en player_state_builder."""
+    from prediction.player_state_builder import fetch_league_avg_probs
 
-        with sync_engine.connect() as conn:
-            row = conn.execute(
-                text("""
-                    SELECT
-                        COALESCE(AVG(prs.k_per_9_30d) / 27.0, 0.225) AS league_k_rate,
-                        COALESCE(AVG(prs.bb_per_9_30d) / 27.0, 0.085) AS league_bb_rate,
-                        COALESCE(AVG(prs.hr_per_9_30d) / 27.0, 0.030) AS league_hr_rate
-                    FROM player_rolling_stats prs
-                    WHERE prs.k_per_9_30d IS NOT NULL
-                      AND prs.as_of_date >= CURRENT_DATE - 30
-                """),
-            ).fetchone()
-        k_rate = float(row[0]) if row and row[0] else 0.225
-        bb_rate = float(row[1]) if row and row[1] else 0.085
-        hr_rate = float(row[2]) if row and row[2] else 0.030
-
-        single_rate = 0.155
-        double_rate = 0.045
-        triple_rate = 0.005
-        hbp_rate = 0.010
-        sac_rate = 0.045
-        out_rate = max(0.0, 1.0 - k_rate - bb_rate - hr_rate - single_rate - double_rate - triple_rate - hbp_rate - sac_rate)
-
-        probs = np.array([out_rate, single_rate, double_rate, triple_rate, hr_rate, bb_rate, hbp_rate, sac_rate])
-        return probs / probs.sum()
-    except Exception as e:
-        logger.warning(f"Could not fetch league avg probs: {e}")
-        return None
+    return fetch_league_avg_probs(sync_engine)
 
 
 def _parse_game_id_date(game_id: str) -> date:
@@ -66,6 +41,7 @@ class SimulationService:
         from api.database import get_async_engine, get_engine
         from prediction.monte_carlo_simulator import MonteCarloMLBSimulator
         from prediction.player_state_builder import (
+            IncompleteLineupError,
             _fetch_pitcher_state,
             _fetch_team_lineup,
         )
@@ -73,8 +49,12 @@ class SimulationService:
         sync_engine = get_engine()
         target_date = _parse_game_id_date(request.game_id)
 
-        home_lineup = _fetch_team_lineup(sync_engine, request.home_team_id, target_date)
-        away_lineup = _fetch_team_lineup(sync_engine, request.away_team_id, target_date)
+        try:
+            home_lineup = _fetch_team_lineup(sync_engine, request.home_team_id, target_date)
+            away_lineup = _fetch_team_lineup(sync_engine, request.away_team_id, target_date)
+        except IncompleteLineupError as e:
+            logger.warning(f"Cannot simulate {request.game_id}: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
 
         home_pitcher = _fetch_pitcher_state(
             sync_engine, request.home_pitcher_id if request.home_pitcher_id else 0, target_date
@@ -263,6 +243,19 @@ class SimulationService:
                 if gi:
                     ctx["stadium_id"] = int(gi[0]) if gi[0] else 0
                     ctx["umpire_id"] = int(gi[1]) if gi[1] else 0
+
+                    # Neutralizar clima si el estadio tiene domo o techo retráctil
+                    if ctx["stadium_id"]:
+                        roof_result = await conn.execute(
+                            text("SELECT roof_type FROM stadiums WHERE stadium_id = :sid"),
+                            {"sid": ctx["stadium_id"]},
+                        )
+                        roof = roof_result.scalar()
+                        if roof in ("dome", "retractable"):
+                            ctx["temperature"] = 72.0
+                            ctx["wind_speed"] = 0.0
+                            ctx["wind_direction"] = "NONE"
+                            logger.info(f"Neutralized weather for domed stadium (game {game_id})")
 
                 for side, tid in [("home", home_team_id), ("away", away_team_id)]:
                     if tid:
