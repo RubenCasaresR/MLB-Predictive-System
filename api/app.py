@@ -9,7 +9,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-import requests as http_requests
+import httpx
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +22,7 @@ from sqlalchemy import text
 
 from api import __version__
 from api.auth import router as auth_router
-from api.database import get_engine
+from api.database import get_async_engine, get_engine
 from api.middleware import RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from api.routers import alerts, analysis, bets, risk, stats
 from etl.config import JWT_SECRET
@@ -51,7 +51,7 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application startup — engine cached")
+    logger.info("Application startup — engines cached")
     if not JWT_SECRET:
         logger.warning(
             "JWT_SECRET not set! Authentication will reject all requests. "
@@ -60,9 +60,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("JWT_SECRET is configured")
     yield
-    engine = get_engine()
-    engine.dispose()
-    logger.info("Application shutdown — engine disposed")
+    sync_engine = get_engine()
+    sync_engine.dispose()
+    async_engine = get_async_engine()
+    try:
+        await async_engine.dispose()
+    except RuntimeError:
+        logger.warning("Event loop closed during async engine dispose — skipping")
+    logger.info("Application shutdown — engines disposed")
 
 
 app = FastAPI(
@@ -130,19 +135,20 @@ if frontend_path.exists():
 async def health_check(request: Request):
     db_status = "unhealthy"
     try:
-        engine = get_engine()
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         db_status = "healthy"
     except Exception as e:
         logger.warning(f"Health check DB failed: {e}")
 
     mlb_api_status = "unknown"
     try:
-        resp = http_requests.get(
-            "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=2024-01-01", timeout=5
-        )
-        mlb_api_status = "healthy" if resp.ok else "unhealthy"
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=2024-01-01"
+            )
+            mlb_api_status = "healthy" if resp.is_success else "unhealthy"
     except Exception as e:
         mlb_api_status = "unreachable"
         logger.warning(f"Health check MLB API failed: {e}")
@@ -151,11 +157,11 @@ async def health_check(request: Request):
     odds_key = os.getenv("ODDS_API_KEY", "")
     if odds_key:
         try:
-            resp = http_requests.get(
-                f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?apiKey={odds_key}&regions=us&markets=h2h",
-                timeout=5,
-            )
-            odds_api_status = "healthy" if resp.ok else "unhealthy"
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(
+                    f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?apiKey={odds_key}&regions=us&markets=h2h"
+                )
+                odds_api_status = "healthy" if resp.is_success else "unhealthy"
         except Exception as e:
             odds_api_status = "unreachable"
             logger.warning(f"Health check Odds API failed: {e}")

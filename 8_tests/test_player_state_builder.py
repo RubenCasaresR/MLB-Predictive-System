@@ -12,9 +12,7 @@ from sqlalchemy import create_engine, text
 
 from prediction.monte_carlo_simulator import BatterState, PitcherState
 from prediction.player_state_builder import (
-    _build_placeholder_lineup,
     _fetch_pitcher_state,
-    _fetch_team_avg_woba,
     _fetch_team_lineup,
     build_player_states_from_db,
 )
@@ -86,6 +84,20 @@ def _create_tables(engine):
                 as_of_date TEXT,
                 woba_30d REAL,
                 UNIQUE(team_id, game_id)
+            )
+        """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE lineups (
+                lineup_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                team_id TEXT NOT NULL,
+                player_id INTEGER NOT NULL,
+                batting_order INTEGER NOT NULL,
+                position TEXT NOT NULL,
+                is_starter INTEGER DEFAULT 1,
+                UNIQUE(game_id, team_id, batting_order)
             )
         """)
         )
@@ -216,7 +228,7 @@ class TestFetchPitcherState:
 
 
 class TestFetchTeamLineup:
-    def test_with_data(self, engine, sample_date):
+    def test_with_lineups_table(self, engine, sample_date):
         with engine.begin() as conn:
             conn.execute(
                 text("""
@@ -238,23 +250,37 @@ class TestFetchTeamLineup:
                     (3, 'G1', '2026-05-19', 0.350, 18.0, 12.0, 0.6, 44.0, 35.0)
             """)
             )
+            conn.execute(
+                text("""
+                INSERT INTO lineups (game_id, team_id, player_id, batting_order, position)
+                VALUES ('20260520-NYY-BOS', 'NYY', 1, 1, 'DH'),
+                       ('20260520-NYY-BOS', 'NYY', 2, 2, '1B'),
+                       ('20260520-NYY-BOS', 'NYY', 3, 3, '2B')
+            """)
+            )
 
         lineup = _fetch_team_lineup(engine, "NYY", sample_date)
-        assert len(lineup) == 3
-        # Ordered by woba_30d desc: 0.380, 0.350, 0.310
+        assert len(lineup) == 9
         assert lineup[0].player_id == 1
         assert lineup[0].bats == "L"
         assert lineup[0].woba_vs_rhp == 0.38
         assert lineup[0].k_rate == 0.2
-        assert lineup[1].player_id == 3
-        assert lineup[1].bats == "S"
-        assert lineup[2].player_id == 2
+        assert lineup[1].player_id == 2
+        assert lineup[2].player_id == 3
 
-    def test_empty_no_data(self, engine, sample_date):
-        lineup = _fetch_team_lineup(engine, "TBD", sample_date)
-        assert lineup == []
+    def test_empty_no_lineups(self, engine, sample_date):
+        with engine.begin() as conn:
+            conn.execute(
+                text("""
+                INSERT INTO players (player_id, full_name, team_id, bats)
+                VALUES (1, 'Batter A', 'NYY', 'L')
+            """)
+            )
+        lineup = _fetch_team_lineup(engine, "NYY", sample_date)
+        assert len(lineup) == 9  # fills with league avg placeholders
+        assert lineup[0].player_id < 0  # placeholder ids are negative
 
-    def test_only_latest_game(self, engine, sample_date):
+    def test_with_stats_only_latest(self, engine, sample_date):
         with engine.begin() as conn:
             conn.execute(
                 text("""
@@ -270,61 +296,19 @@ class TestFetchTeamLineup:
                        (1, 'G2', '2026-05-19', 0.400)
             """)
             )
+            conn.execute(
+                text("""
+                INSERT INTO lineups (game_id, team_id, player_id, batting_order, position)
+                VALUES ('20260520-NYY-BOS', 'NYY', 1, 1, 'DH')
+            """)
+            )
 
         lineup = _fetch_team_lineup(engine, "NYY", sample_date)
-        assert len(lineup) == 1
+        assert len(lineup) == 9  # 1 real + 8 league avg placeholders
         assert lineup[0].woba_vs_rhp == 0.4
 
 
-# ============================================================================
-# Tests: _build_placeholder_lineup
-# ============================================================================
 
-
-class TestBuildPlaceholderLineup:
-    def test_returns_nine_batters(self):
-        lineup = _build_placeholder_lineup("NYY", 0.320, 9)
-        assert len(lineup) == 9
-
-    def test_alternating_handedness(self):
-        lineup = _build_placeholder_lineup("NYY", 0.310, 3)
-        assert lineup[0].bats == "L"
-        assert lineup[1].bats == "R"
-        assert lineup[2].bats == "R"
-
-    def test_team_woba_assigned(self):
-        lineup = _build_placeholder_lineup("BOS", 0.335)
-        for b in lineup:
-            assert b.woba_vs_rhp == 0.335
-            assert round(b.woba_vs_lhp, 3) == round(0.335 * 0.95, 3)
-
-    def test_negative_player_id(self):
-        lineup = _build_placeholder_lineup("HOU", 0.310, 1)
-        assert lineup[0].player_id < 0
-        assert "HOU" in lineup[0].name
-
-
-# ============================================================================
-# Tests: _fetch_team_avg_woba
-# ============================================================================
-
-
-class TestFetchTeamAvgWoba:
-    def test_returns_latest_woba(self, engine, sample_date):
-        with engine.begin() as conn:
-            conn.execute(
-                text("""
-                INSERT INTO team_rolling_stats (team_id, game_id, as_of_date, woba_30d)
-                VALUES ('LAD', 'G1', '2026-05-18', 0.345),
-                       ('LAD', 'G2', '2026-05-19', 0.360)
-            """)
-            )
-        woba = _fetch_team_avg_woba(engine, "LAD", sample_date)
-        assert woba == 0.360
-
-    def test_fallback_to_league_avg(self, engine, sample_date):
-        woba = _fetch_team_avg_woba(engine, "NONEXISTENT", sample_date)
-        assert woba == 0.310
 
 
 # ============================================================================
@@ -381,15 +365,7 @@ class TestBuildPlayerStatesFromDb:
         assert home_p.avg_velo == 97.5
         assert len(home_l) == 9
 
-    def test_uses_team_woba_for_placeholder(self, engine, sample_date):
-        with engine.begin() as conn:
-            conn.execute(
-                text("""
-                INSERT INTO team_rolling_stats (team_id, game_id, as_of_date, woba_30d)
-                VALUES ('NYY', 'G0', '2026-05-19', 0.375)
-            """)
-            )
-
+    def test_placeholder_uses_league_avg_woba(self, engine, sample_date):
         home_l, _, _, _ = build_player_states_from_db(
             engine,
             "G1",
@@ -399,4 +375,4 @@ class TestBuildPlayerStatesFromDb:
             200,
             sample_date,
         )
-        assert all(b.woba_vs_rhp == 0.375 for b in home_l)
+        assert all(b.woba_vs_rhp == 0.310 for b in home_l)

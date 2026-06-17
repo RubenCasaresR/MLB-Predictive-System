@@ -68,6 +68,7 @@ CREATE TABLE stadiums (
     pf_lefthand   DECIMAL(4,3),
     pf_righthand  DECIMAL(4,3),
     pf_hr         DECIMAL(4,3),
+    roof_type     VARCHAR(10)   DEFAULT 'open' CHECK (roof_type IN ('open', 'dome', 'retractable')),
     created_at    TIMESTAMP     DEFAULT NOW()
 );
 

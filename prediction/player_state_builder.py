@@ -117,29 +117,34 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterSt
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT brs.player_id, brs.woba_30d, brs.k_pct_30d,
+                SELECT l.player_id, l.batting_order,
+                       brs.woba_30d, brs.k_pct_30d,
                        brs.bb_pct_30d, brs.hr_per_9_30d,
                        brs.groundball_pct_30d, brs.flyball_pct_30d,
                        p.bats, p.full_name
-                FROM batter_rolling_stats brs
-                JOIN players p ON p.player_id = brs.player_id
-                WHERE p.team_id = :tid
-                  AND brs.as_of_date = (
-                    SELECT MAX(brs2.as_of_date)
-                    FROM batter_rolling_stats brs2
-                    WHERE brs2.player_id = brs.player_id
-                      AND brs2.as_of_date <= :gd
-                  )
-                ORDER BY brs.woba_30d DESC
-                LIMIT 9
+                FROM lineups l
+                JOIN players p ON p.player_id = l.player_id
+                LEFT JOIN batter_rolling_stats brs
+                    ON brs.player_id = l.player_id
+                    AND brs.as_of_date = (
+                        SELECT MAX(brs2.as_of_date)
+                        FROM batter_rolling_stats brs2
+                        WHERE brs2.player_id = l.player_id
+                          AND brs2.as_of_date <= :gd
+                    )
+                WHERE l.team_id = :tid
+                  AND l.game_id LIKE :gid_pattern
+                  AND l.is_starter = TRUE
+                ORDER BY l.batting_order
             """),
-            {"tid": team_id, "gd": target_date.isoformat()},
+            {"tid": team_id, "gd": target_date.isoformat(), "gid_pattern": f"{target_date.isoformat().replace('-', '')}%"},
         )
         rows = result.fetchall()
 
     lineups = []
     for (
         pid,
+        order,
         woba_30d,
         k_pct,
         bb_pct,
@@ -175,45 +180,28 @@ def _fetch_team_lineup(engine, team_id: str, target_date: date) -> list[BatterSt
             )
         )
 
+    if len(lineups) < 9:
+        needed = 9 - len(lineups)
+        for i in range(needed):
+            idx = len(lineups) + i
+            lineups.append(
+                BatterState(
+                    player_id=-(hash(team_id) % 10000 + idx),
+                    name=f"{team_id}_Fill_{idx + 1}",
+                    bats=("L" if idx % 3 == 0 else "R"),
+                    woba_vs_rhp=round(_LEAGUE_AVG_WOBA, 3),
+                    woba_vs_lhp=round(_LEAGUE_AVG_WOBA * 0.95, 3),
+                    woba_30d=round(_LEAGUE_AVG_WOBA, 3),
+                    k_pct_30d=_LEAGUE_AVG_K_RATE * 100,
+                    bb_pct_30d=_LEAGUE_AVG_BB_RATE * 100,
+                    slg_30d=0.400,
+                    hard_hit_pct_30d=38.0,
+                    barrel_pct_30d=8.0,
+                )
+            )
+        logger.info(f"Filled {needed} league-average batters for {team_id} lineup")
+
     return lineups
-
-
-def _build_placeholder_lineup(team_id: str, team_woba: float, count: int = 9) -> list[BatterState]:
-    return [
-        BatterState(
-            player_id=-(hash(team_id) % 10000 + i),
-            name=f"{team_id}_Batter_{i + 1}",
-            bats=("L" if i % 3 == 0 else "R"),
-            woba_vs_rhp=round(team_woba, 3),
-            woba_vs_lhp=round(team_woba * 0.95, 3),
-            woba_30d=round(team_woba, 3),
-            k_pct_30d=22.0,
-            bb_pct_30d=8.5,
-            slg_30d=0.400,
-            hard_hit_pct_30d=38.0,
-            barrel_pct_30d=8.0,
-        )
-        for i in range(count)
-    ]
-
-
-def _fetch_team_avg_woba(engine, team_id: str, target_date: date) -> float:
-    with engine.connect() as conn:
-        result = conn.execute(
-            text("""
-                SELECT woba_30d
-                FROM team_rolling_stats
-                WHERE team_id = :tid
-                  AND as_of_date <= :gd
-                ORDER BY as_of_date DESC
-                LIMIT 1
-            """),
-            {"tid": team_id, "gd": target_date.isoformat()},
-        )
-        row = result.fetchone()
-        if row and row[0] is not None:
-            return float(row[0])
-    return _LEAGUE_AVG_WOBA
 
 
 def build_player_states_from_db(
@@ -231,21 +219,5 @@ def build_player_states_from_db(
 
     home_lineup = _fetch_team_lineup(engine, home_team_id, target_date)
     away_lineup = _fetch_team_lineup(engine, away_team_id, target_date)
-
-    if len(home_lineup) < 9:
-        team_woba = _fetch_team_avg_woba(engine, home_team_id, target_date)
-        needed = 9 - len(home_lineup)
-        home_lineup.extend(_build_placeholder_lineup(home_team_id, team_woba, needed))
-        logger.info(
-            f"Filled {needed} placeholder batters for {home_team_id} (team wOBA={team_woba:.3f})"
-        )
-
-    if len(away_lineup) < 9:
-        team_woba = _fetch_team_avg_woba(engine, away_team_id, target_date)
-        needed = 9 - len(away_lineup)
-        away_lineup.extend(_build_placeholder_lineup(away_team_id, team_woba, needed))
-        logger.info(
-            f"Filled {needed} placeholder batters for {away_team_id} (team wOBA={team_woba:.3f})"
-        )
 
     return home_lineup, away_lineup, home_pitcher, away_pitcher

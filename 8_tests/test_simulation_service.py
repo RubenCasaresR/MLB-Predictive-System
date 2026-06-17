@@ -4,7 +4,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -54,8 +54,8 @@ PATCHES_SRC = [
     "prediction.monte_carlo_simulator.MonteCarloMLBSimulator",
     "prediction.player_state_builder._fetch_team_lineup",
     "prediction.player_state_builder._fetch_pitcher_state",
-    "prediction.player_state_builder._build_placeholder_lineup",
     "api.database.get_engine",
+    "api.database.get_async_engine",
 ]
 
 
@@ -105,8 +105,8 @@ class TestRunSimulation:
         self.mock_sim_class = self.mocks[0]
         self.mock_fetch_lineup = self.mocks[1]
         self.mock_fetch_pitcher = self.mocks[2]
-        self.mock_placeholder = self.mocks[3]
-        self.mock_engine = self.mocks[4]
+        self.mock_engine = self.mocks[3]
+        self.mock_async_engine = self.mocks[4]
 
         self.mock_sim = self.mock_sim_class.return_value
         self.mock_sim.run_simulation.return_value = make_mock_result()
@@ -149,11 +149,12 @@ class TestRunSimulation:
         self._run()
         self._teardown()
 
-        self.mock_sim_class.assert_called_once_with(seed=42)
+        _, sim_kwargs = self.mock_sim_class.call_args
+        assert sim_kwargs["seed"] == 42
 
     def test_run_simulation_called_with_correct_args(self):
         self._setup()
-        self.svc._fetch_game_context = MagicMock(return_value={
+        self.svc._fetch_game_context = AsyncMock(return_value={
             "pf_hr": 1.05, "pf_woba": 1.0, "pf_k": 1.0,
             "temperature": 70, "wind_speed": 0, "wind_direction": "NONE",
             "umpire_cs_rate": 0, "stadium_id": 0, "umpire_id": 0,
@@ -179,70 +180,7 @@ class TestRunSimulation:
         assert isinstance(response.computed_at, datetime)
 
 
-class TestLineupPadding:
-    def _setup(self, home_len=9, away_len=9):
-        self.patches = [
-            patch(PATCHES_SRC[0]),
-            patch(PATCHES_SRC[1]),
-            patch(PATCHES_SRC[2]),
-            patch(PATCHES_SRC[3]),
-            patch(PATCHES_SRC[4]),
-        ]
-        self.mocks = [p.__enter__() for p in self.patches]
-        self.mock_sim_class = self.mocks[0]
-        self.mock_fetch_lineup = self.mocks[1]
-        self.mock_fetch_pitcher = self.mocks[2]
-        self.mock_placeholder = self.mocks[3]
-        self.mock_engine = self.mocks[4]
 
-        self.mock_sim = self.mock_sim_class.return_value
-        self.mock_sim.run_simulation.return_value = make_mock_result()
-        self.mock_fetch_lineup.side_effect = [
-            [MagicMock() for _ in range(home_len)],
-            [MagicMock() for _ in range(away_len)],
-        ]
-        self.mock_fetch_pitcher.return_value = MagicMock()
-        self.svc = SimulationService()
-
-    def _teardown(self):
-        for p in self.patches:
-            p.__exit__(None, None, None)
-
-    def test_pads_home_lineup_when_short(self):
-        self._setup(home_len=5, away_len=9)
-        self.mock_placeholder.return_value = [MagicMock() for _ in range(4)]
-        run_async(self.svc.run_simulation(SAMPLE_REQUEST))
-        self._teardown()
-
-        self.mock_placeholder.assert_called_once_with("NYY", 0.310, 4)
-
-    def test_pads_away_lineup_when_short(self):
-        self._setup(home_len=9, away_len=3)
-        self.mock_placeholder.return_value = [MagicMock() for _ in range(6)]
-        run_async(self.svc.run_simulation(SAMPLE_REQUEST))
-        self._teardown()
-
-        self.mock_placeholder.assert_called_once_with("BOS", 0.310, 6)
-
-    def test_no_padding_when_both_full(self):
-        self._setup(home_len=9, away_len=9)
-        run_async(self.svc.run_simulation(SAMPLE_REQUEST))
-        self._teardown()
-
-        self.mock_placeholder.assert_not_called()
-
-    def test_pads_both_when_both_short(self):
-        self._setup(home_len=4, away_len=2)
-        self.mock_placeholder.side_effect = [
-            [MagicMock() for _ in range(5)],
-            [MagicMock() for _ in range(7)],
-        ]
-        run_async(self.svc.run_simulation(SAMPLE_REQUEST))
-        self._teardown()
-
-        assert self.mock_placeholder.call_count == 2
-        self.mock_placeholder.assert_any_call("NYY", 0.310, 5)
-        self.mock_placeholder.assert_any_call("BOS", 0.310, 7)
 
 
 class TestDatabaseInteraction:
@@ -258,8 +196,8 @@ class TestDatabaseInteraction:
         self.mock_sim_class = self.mocks[0]
         self.mock_fetch_lineup = self.mocks[1]
         self.mock_fetch_pitcher = self.mocks[2]
-        self.mock_placeholder = self.mocks[3]
-        self.mock_engine = self.mocks[4]
+        self.mock_engine = self.mocks[3]
+        self.mock_async_engine = self.mocks[4]
 
         self.mock_sim = self.mock_sim_class.return_value
         self.mock_sim.run_simulation.return_value = make_mock_result()
@@ -309,8 +247,8 @@ class TestRunDistributionKeys:
         self.mock_sim_class = self.mocks[0]
         self.mock_fetch_lineup = self.mocks[1]
         self.mock_fetch_pitcher = self.mocks[2]
-        self.mock_placeholder = self.mocks[3]
-        self.mock_engine = self.mocks[4]
+        self.mock_engine = self.mocks[3]
+        self.mock_async_engine = self.mocks[4]
 
         self.mock_sim = self.mock_sim_class.return_value
         self.mock_sim.run_simulation.return_value = make_mock_result(**overrides)

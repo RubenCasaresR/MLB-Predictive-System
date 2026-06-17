@@ -10,8 +10,10 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 
 from api.auth import get_current_user
+from api.database import get_async_engine
 from api.models.pydantic_models import (
     BetSlipRequest,
     BetSlipResponse,
@@ -137,7 +139,7 @@ async def submit_bet_slip(request: BetSlipRequest):
     violations = []
 
     for bet in request.bets:
-        check = bm.check_exposure(stake=bet.stake)
+        check = bm.check_exposure(stake=bet.stake, game_id=bet.game_id)
         if not check["approved"]:
             violations.extend(check["violations"])
 
@@ -156,14 +158,9 @@ async def submit_bet_slip(request: BetSlipRequest):
 
 @router.get("/simulate/{game_id}", response_model=SimulationResponse)
 async def get_simulation(game_id: str):
-    from sqlalchemy import text
-
-    from api.database import get_engine
-
-    engine = get_engine()
-
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        row = await conn.execute(
             text("""
                 SELECT home_win_prob, away_win_prob,
                        mean_home_runs, mean_away_runs,
@@ -174,27 +171,28 @@ async def get_simulation(game_id: str):
                 WHERE game_id = :gid
             """),
             {"gid": game_id},
-        ).fetchone()
+        )
+        result = row.fetchone()
 
-    if not row:
+    if not result:
         raise HTTPException(status_code=404, detail="Simulation not found for this game")
 
-    run_dist = json.loads(row[8]) if row[8] else {}
+    run_dist = json.loads(result[8]) if result[8] else {}
 
     return SimulationResponse(
         game_id=game_id,
-        home_win_prob=float(row[0]),
-        away_win_prob=float(row[1]),
-        mean_home_runs=float(row[2]) if row[2] else 0,
-        mean_away_runs=float(row[3]) if row[3] else 0,
-        std_home_runs=float(row[4]) if row[4] else 0,
-        std_away_runs=float(row[5]) if row[5] else 0,
-        extra_innings_prob=float(row[6]) if row[6] else 0,
-        walkoff_prob=float(row[7]) if row[7] else 0,
-        n_iterations=row[9] or 10000,
+        home_win_prob=float(result[0]),
+        away_win_prob=float(result[1]),
+        mean_home_runs=float(result[2]) if result[2] else 0,
+        mean_away_runs=float(result[3]) if result[3] else 0,
+        std_home_runs=float(result[4]) if result[4] else 0,
+        std_away_runs=float(result[5]) if result[5] else 0,
+        extra_innings_prob=float(result[6]) if result[6] else 0,
+        walkoff_prob=float(result[7]) if result[7] else 0,
+        n_iterations=result[9] or 10000,
         home_run_distribution=run_dist,
         away_run_distribution=run_dist,
-        computed_at=row[10] or datetime.now(),
+        computed_at=result[10] or datetime.now(),
     )
 
 
@@ -203,13 +201,9 @@ async def get_approved_bets(
     limit: int = Query(10, ge=1, le=100),
     min_edge: float = Query(0.02, ge=0.0, le=1.0),
 ):
-    from sqlalchemy import text
-
-    from api.database import get_engine
-
-    engine = get_engine()
-    with engine.connect() as conn:
-        rows = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("""
                 SELECT ab.game_id, ab.team, ab.opponent, ab.sportsbook,
                        ab.market_type, ab.odds, ab.edge, ab.kelly_fraction,
@@ -221,7 +215,8 @@ async def get_approved_bets(
                 LIMIT :lim
             """),
             {"me": min_edge, "lim": limit},
-        ).fetchall()
+        )
+        rows = result.fetchall()
 
     return [
         {
@@ -251,19 +246,14 @@ async def get_sure_bets():
     from api.services.sure_bets import SureBetService
 
     service = SureBetService()
-    return service.get_sure_bets()
+    return await service.get_sure_bets()
 
 
 @router.get("/history")
 async def get_bet_history(limit: int = Query(50, ge=1, le=500)):
-    from sqlalchemy import text
-
-    from api.database import get_engine
-
-    engine = get_engine()
-
-    with engine.connect() as conn:
-        rows = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("""
                 SELECT bet_id, game_id, team, market_type, odds, stake,
                        won, profit_loss, kelly_pct, edge, placed_at
@@ -272,7 +262,8 @@ async def get_bet_history(limit: int = Query(50, ge=1, le=500)):
                 LIMIT :lim
             """),
             {"lim": limit},
-        ).fetchall()
+        )
+        rows = result.fetchall()
 
     return [
         {

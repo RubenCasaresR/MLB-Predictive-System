@@ -9,7 +9,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from api.database import get_engine
+from api.database import get_async_engine
 from etl.config import JWT_ACCESS_TOKEN_EXPIRE_MINUTES, JWT_ALGORITHM, JWT_SECRET
 
 logger = logging.getLogger(__name__)
@@ -70,12 +70,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except (JWTError, ValueError, TypeError):
         raise credentials_exception
 
-    engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("SELECT user_id, username FROM users WHERE user_id = :uid"),
             {"uid": user_id},
-        ).fetchone()
+        )
+        row = result.fetchone()
     if row is None:
         raise credentials_exception
     return {"user_id": row[0], "username": row[1]}
@@ -83,22 +84,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @router.post("/register")
 async def register(user: UserCreate):
-    engine = get_engine()
-    with engine.connect() as conn:
-        existing = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        existing_result = await conn.execute(
             text("SELECT user_id FROM users WHERE username = :u"),
             {"u": user.username},
-        ).fetchone()
+        )
+        existing = existing_result.fetchone()
         if existing:
             raise HTTPException(status_code=400, detail="Username already exists")
 
     hashed = get_password_hash(user.password)
-    with engine.begin() as conn:
-        result = conn.execute(
+    async with async_engine.begin() as conn:
+        insert_result = await conn.execute(
             text("INSERT INTO users (username, hashed_password) VALUES (:u, :h) RETURNING user_id"),
             {"u": user.username, "h": hashed},
         )
-        user_id = result.fetchone()[0]
+        user_id = insert_result.fetchone()[0]
 
     token = create_access_token(data={"sub": user_id})
     return TokenResponse(access_token=token, user_id=user_id)
@@ -106,12 +108,13 @@ async def register(user: UserCreate):
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("SELECT user_id, username, hashed_password FROM users WHERE username = :u"),
             {"u": form_data.username},
-        ).fetchone()
+        )
+        row = result.fetchone()
 
     if not row or not verify_password(form_data.password, row[2]):
         raise HTTPException(status_code=401, detail="Invalid credentials")

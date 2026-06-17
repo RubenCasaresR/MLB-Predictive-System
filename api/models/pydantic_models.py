@@ -6,7 +6,7 @@
 
 from typing import List, Optional, Dict
 from datetime import datetime, date
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============================================================================
@@ -24,7 +24,8 @@ class SimulationRequest(BaseModel):
     park_factor_hr: float = 1.0
     n_iterations: int = 10000
 
-    @validator("n_iterations")
+    @field_validator("n_iterations")
+    @classmethod
     def validate_iterations(cls, v):
         if v < 1000:
             raise ValueError("Minimum 1000 iterations")

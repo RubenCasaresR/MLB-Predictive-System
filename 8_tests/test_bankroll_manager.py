@@ -116,20 +116,35 @@ class TestCheckExposure:
         assert any("exceeds max per bet" in v for v in result["violations"])
 
     def test_exceeds_max_drawdown(self, bm):
-        # max_drawdown = 0.20, so min bankroll = 8000
         result = bm.check_exposure(stake=2500.0)
         assert result["approved"] is False
         assert any("drawdown" in v for v in result["violations"])
 
     def test_exceeds_daily_limit(self, bm):
         bet_date = date(2026, 5, 20)
-        # Add some bets today
         bm.bet_history = [
             {"stake": 2000, "won": True, "date": bet_date},
         ]
         result = bm.check_exposure(stake=600.0, bet_date=bet_date)
         assert result["approved"] is False
         assert any("Daily total" in v for v in result["violations"])
+
+    def test_exceeds_per_game_limit(self, bm):
+        bm._game_exposures["GAME001"] = 800.0
+        result = bm.check_exposure(stake=300.0, game_id="GAME001")
+        assert result["approved"] is False
+        assert any("max per game" in v for v in result["violations"])
+
+    def test_within_per_game_limit(self, bm):
+        bm._game_exposures["GAME001"] = 400.0
+        result = bm.check_exposure(stake=300.0, game_id="GAME001")
+        assert result["approved"] is True
+
+    def test_record_bet_tracks_game_exposure(self, bm):
+        bm.record_bet(stake=300.0, odds=-110, result=True, game_id="GAME001")
+        assert bm._game_exposures["GAME001"] == 300.0
+        bm.record_bet(stake=200.0, odds=-110, result=True, game_id="GAME001")
+        assert bm._game_exposures["GAME001"] == 500.0
 
     def test_recent_losses_triggers_cooling_off(self, bm):
         bm.bet_history = [
@@ -138,7 +153,7 @@ class TestCheckExposure:
             {"stake": 500, "won": False, "date": date(2026, 5, 19)},
             {"stake": 200, "won": False, "date": date(2026, 5, 20)},
             {"stake": 300, "won": False, "date": date(2026, 5, 20)},
-        ]  # last 5 losses total = 1700 > 1500 (15% of 10000)
+        ]
         result = bm.check_exposure(stake=100.0)
         assert result["approved"] is False
         assert any("cooling off" in v.lower() for v in result["violations"])
@@ -199,5 +214,6 @@ class TestExposureLimit:
         assert limits.max_per_bet == 500.0
         assert limits.max_per_day == 2500.0
         assert limits.max_per_week == 10000.0
+        assert limits.max_per_game == 1000.0
         assert limits.max_drawdown == 0.20
         assert limits.max_concurrent_bets == 10

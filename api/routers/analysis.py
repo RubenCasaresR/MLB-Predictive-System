@@ -16,4 +16,4 @@ async def get_daily_analysis(
     from api.services.daily_analysis_service import DailyAnalysisService
 
     service = DailyAnalysisService()
-    return service.get_analysis(target_date=date)
+    return await service.get_analysis(target_date=date)

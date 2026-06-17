@@ -75,6 +75,27 @@ class WeatherIngestor:
         )
         logger.info("WeatherIngestor initialized")
 
+    def _get_roof_type(self, stadium_id: int) -> str | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT roof_type FROM stadiums WHERE stadium_id = :sid"),
+                {"sid": stadium_id},
+            ).fetchone()
+            return row[0] if row else None
+
+    def _neutralise_weather(self) -> list[dict]:
+        return [
+            {
+                "forecast_hour": "",
+                "temperature": 70.0,
+                "wind_speed": 0.0,
+                "wind_direction": "NONE",
+                "humidity": 50.0,
+                "precipitation_pct": 0.0,
+                "condition": "Dome",
+            }
+        ]
+
     @with_retry()
     def get_forecast_for_stadium(self, lat: float, lon: float) -> dict | None:
         points_url = f"https://api.weather.gov/points/{lat},{lon}"
@@ -113,6 +134,18 @@ class WeatherIngestor:
         return float(match.group(1)) if match else 0.0
 
     def ingest_game_weather(self, game_id: str, stadium_id: int, game_time: datetime):
+        roof = self._get_roof_type(stadium_id)
+        if roof in ("dome", "retractable"):
+            hourly = self._neutralise_weather()
+            df = pd.DataFrame(hourly)
+            df["game_id"] = game_id
+            df["forecast_hour"] = pd.to_datetime(game_time).tz_localize(None)
+
+            with self.engine.begin() as conn:
+                df.to_sql("weather_hourly", conn, if_exists="append", index=False)
+            logger.info(f"Loaded neutralised weather (dome) for {game_id}")
+            return
+
         coords = self.STADIUM_COORDS.get(stadium_id)
         if not coords:
             # Try loading from database

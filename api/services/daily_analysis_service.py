@@ -1,6 +1,7 @@
 import logging
 import math
 import os
+import time
 import traceback
 from datetime import date as date_mod
 from datetime import datetime, timezone
@@ -10,7 +11,6 @@ from zoneinfo import ZoneInfo
 import requests as http_requests
 from sqlalchemy import text
 
-from api.database import get_engine
 from api.models.pydantic_models import (
     BullpenAnalysis,
     DailyAnalysisResponse,
@@ -149,15 +149,34 @@ def _kelly(prob: float, odds: int, fraction: float = 0.25) -> float:
 
 class DailyAnalysisService:
     def __init__(self):
-        self.engine = get_engine()
         self.tz_name = os.getenv("TIMEZONE", "America/Mexico_City")
         self.target_tz = ZoneInfo(self.tz_name)
+        self._cache: dict[str, tuple[float, DailyAnalysisResponse]] = {}
+        self._cache_ttl: int = 300  # 5 minutes
 
-    def get_analysis(self, target_date: str | None = None) -> DailyAnalysisResponse:
+    def _get_cached(self, key: str) -> DailyAnalysisResponse | None:
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        ts, value = entry
+        if time.monotonic() - ts > self._cache_ttl:
+            del self._cache[key]
+            return None
+        return value
+
+    def _set_cached(self, key: str, value: DailyAnalysisResponse):
+        self._cache[key] = (time.monotonic(), value)
+
+    async def get_analysis(self, target_date: str | None = None) -> DailyAnalysisResponse:
         if target_date:
             game_date = target_date
         else:
             game_date = datetime.now(self.target_tz).strftime("%Y-%m-%d")
+
+        cached = self._get_cached(game_date)
+        if cached is not None:
+            logger.info("Returning cached analysis for %s", game_date)
+            return cached
 
         logger.info(
             "get_analysis: target_date=%s resolved_date=%s tz=%s",
@@ -166,7 +185,7 @@ class DailyAnalysisService:
             self.tz_name,
         )
 
-        games = self._get_games(game_date)
+        games = await self._get_games(game_date)
         if not games:
             logger.info("No games in DB for %s, trying live MLB API", game_date)
             games = self._fetch_live_games(game_date)
@@ -174,7 +193,7 @@ class DailyAnalysisService:
 
         for game in games:
             try:
-                analysis = self._analyze_game(game)
+                analysis = await self._analyze_game(game)
                 analyses.append(analysis)
             except Exception as e:
                 logger.warning(f"Error analyzing game {game.get('game_id')}: {e}")
@@ -186,16 +205,21 @@ class DailyAnalysisService:
             )
         )
 
-        return DailyAnalysisResponse(
+        response = DailyAnalysisResponse(
             game_date=game_date,
             generated_at=datetime.now(self.target_tz),
             total_games=len(analyses),
             games=analyses,
         )
+        self._set_cached(game_date, response)
+        return response
 
-    def _get_games(self, game_date: str) -> list[dict]:
-        with self.engine.connect() as conn:
-            rows = conn.execute(
+    async def _get_games(self, game_date: str) -> list[dict]:
+        from api.database import get_async_engine
+
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT g.game_id, g.game_date, g.home_team_id, g.away_team_id,
                        g.home_probable_pitcher, g.away_probable_pitcher,
@@ -211,7 +235,8 @@ class DailyAnalysisService:
                 ORDER BY g.start_time_et
             """),
                 {"gd": game_date},
-            ).fetchall()
+            )
+            rows = result.fetchall()
 
         return [
             {
@@ -295,21 +320,21 @@ class DailyAnalysisService:
             "is_live_source": True,
         }
 
-    def _analyze_game(self, game: dict) -> GameAnalysis:
+    async def _analyze_game(self, game: dict) -> GameAnalysis:
         gid = game["game_id"]
         home = game["home_team_id"]
         away = game["away_team_id"]
 
-        sim = self._get_simulation(gid)
-        market = self._get_market(gid)
-        pitchers = self._get_pitcher_data(
+        sim = await self._get_simulation(gid)
+        market = await self._get_market(gid)
+        pitchers = await self._get_pitcher_data(
             gid, home, away, game.get("home_pitcher_id"), game.get("away_pitcher_id")
         )
-        teams_data = self._get_team_data(home, away)
-        weather_data = self._get_weather(gid)
-        park_data = self._get_park_factors(gid, game.get("venue_id"))
-        home_batters = self._get_batter_data(gid, home)
-        away_batters = self._get_batter_data(gid, away)
+        teams_data = await self._get_team_data(home, away)
+        weather_data = await self._get_weather(gid)
+        park_data = await self._get_park_factors(gid, game.get("venue_id"))
+        home_batters = await self._get_batter_data(gid, home)
+        away_batters = await self._get_batter_data(gid, away)
 
         home_win_prob = sim.get("home_win_prob", 0.5) if sim else 0.5
         away_win_prob = sim.get("away_win_prob", 0.5) if sim else 0.5
@@ -417,9 +442,12 @@ class DailyAnalysisService:
             key_factors=key_factors,
         )
 
-    def _get_simulation(self, game_id: str) -> dict | None:
-        with self.engine.connect() as conn:
-            row = conn.execute(
+    async def _get_simulation(self, game_id: str) -> dict | None:
+        from api.database import get_async_engine
+
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT home_win_prob, away_win_prob,
                        mean_home_runs, mean_away_runs,
@@ -429,7 +457,8 @@ class DailyAnalysisService:
                 WHERE game_id = :gid
             """),
                 {"gid": game_id},
-            ).fetchone()
+            )
+            row = result.fetchone()
         if not row:
             return None
         return {
@@ -444,9 +473,12 @@ class DailyAnalysisService:
             "n_iterations": row[8] or 10000,
         }
 
-    def _get_market(self, game_id: str) -> dict | None:
-        with self.engine.connect() as conn:
-            row = conn.execute(
+    async def _get_market(self, game_id: str) -> dict | None:
+        from api.database import get_async_engine
+
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT home_moneyline_close, away_moneyline_close,
                        total_close, total_over_odds_close, total_under_odds_close,
@@ -459,7 +491,8 @@ class DailyAnalysisService:
                 LIMIT 1
             """),
                 {"gid": game_id},
-            ).fetchone()
+            )
+            row = result.fetchone()
         if not row:
             return None
         return {
@@ -476,9 +509,12 @@ class DailyAnalysisService:
             "away_money_pct": float(row[10]) if row[10] else None,
         }
 
-    def _get_pitcher_data(
+    async def _get_pitcher_data(
         self, game_id: str, home_team: str, away_team: str, home_pitcher_id, away_pitcher_id
     ) -> dict:
+        from api.database import get_async_engine
+
+        async_engine = get_async_engine()
         result = {"home": {"player_id": home_pitcher_id}, "away": {"player_id": away_pitcher_id}}
         for side, pid, team in [
             ("home", home_pitcher_id, home_team),
@@ -490,8 +526,8 @@ class DailyAnalysisService:
                 pid_int = int(pid)
             except (ValueError, TypeError):
                 continue
-            with self.engine.connect() as conn:
-                row = conn.execute(
+            async with async_engine.connect() as conn:
+                db_result = await conn.execute(
                     text("""
                     SELECT prs.fatigue_score, prs.fip_30d, prs.avg_velo_30d,
                            prs.k_per_9_30d, prs.whiff_pct_30d, prs.avg_spin_30d,
@@ -504,7 +540,8 @@ class DailyAnalysisService:
                     LIMIT 1
                 """),
                     {"pid": pid_int},
-                ).fetchone()
+                )
+                row = db_result.fetchone()
             if row:
                 result[side] = {
                     "player_id": pid_int,
@@ -521,11 +558,14 @@ class DailyAnalysisService:
                 }
         return result
 
-    def _get_team_data(self, home_team: str, away_team: str) -> dict:
+    async def _get_team_data(self, home_team: str, away_team: str) -> dict:
+        from api.database import get_async_engine
+
+        async_engine = get_async_engine()
         result = {"home": {}, "away": {}}
         for side, team in [("home", home_team), ("away", away_team)]:
-            with self.engine.connect() as conn:
-                row = conn.execute(
+            async with async_engine.connect() as conn:
+                db_result = await conn.execute(
                     text("""
                     SELECT bullpen_era_30d, bullpen_fip_30d, record_last_10,
                            run_diff_30d, woba_30d, woba_vs_rhp_30d,
@@ -537,7 +577,8 @@ class DailyAnalysisService:
                     LIMIT 1
                 """),
                     {"tid": team},
-                ).fetchone()
+                )
+                row = db_result.fetchone()
             if row:
                 result[side] = {
                     "bullpen_era_30d": float(row[0]) if row[0] else None,
@@ -554,9 +595,12 @@ class DailyAnalysisService:
                 }
         return result
 
-    def _get_weather(self, game_id: str) -> dict | None:
-        with self.engine.connect() as conn:
-            row = conn.execute(
+    async def _get_weather(self, game_id: str) -> dict | None:
+        from api.database import get_async_engine
+
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT temperature, wind_speed, wind_direction,
                        precipitation_pct, condition
@@ -566,7 +610,8 @@ class DailyAnalysisService:
                 LIMIT 1
             """),
                 {"gid": game_id},
-            ).fetchone()
+            )
+            row = result.fetchone()
         if not row:
             return None
         return {
@@ -577,15 +622,18 @@ class DailyAnalysisService:
             "condition": row[4] or "",
         }
 
-    def _get_park_factors(self, game_id: str, venue_id) -> dict | None:
+    async def _get_park_factors(self, game_id: str, venue_id) -> dict | None:
+        from api.database import get_async_engine
+
         if not venue_id:
             return None
         try:
             vid = int(venue_id)
         except (ValueError, TypeError):
             return None
-        with self.engine.connect() as conn:
-            row = conn.execute(
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT pfm.pf_hr, pfm.pf_woba, pfm.pf_k,
                        s.name
@@ -596,16 +644,18 @@ class DailyAnalysisService:
                 LIMIT 1
             """),
                 {"vid": vid},
-            ).fetchone()
+            )
+            row = result.fetchone()
             if not row:
-                row2 = conn.execute(
+                result2 = await conn.execute(
                     text("""
                     SELECT 1.0, 1.0, 1.0, s.name
                     FROM stadiums s
                     WHERE s.stadium_id = :vid
                 """),
                     {"vid": vid},
-                ).fetchone()
+                )
+                row2 = result2.fetchone()
                 if row2:
                     return {
                         "hr_factor": float(row2[0]),
@@ -621,9 +671,12 @@ class DailyAnalysisService:
             "stadium_name": row[3] or "",
         }
 
-    def _get_batter_data(self, game_id: str, team_id: str) -> list[dict]:
-        with self.engine.connect() as conn:
-            rows = conn.execute(
+    async def _get_batter_data(self, game_id: str, team_id: str) -> list[dict]:
+        from api.database import get_async_engine
+
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT p.full_name, brs.woba_30d, brs.k_pct_30d, brs.bb_pct_30d,
                        brs.hr_per_9_30d,
@@ -636,7 +689,8 @@ class DailyAnalysisService:
                 LIMIT 9
             """),
                 {"tid": team_id},
-            ).fetchall()
+            )
+            rows = result.fetchall()
         return [
             {
                 "player_id": r[7],

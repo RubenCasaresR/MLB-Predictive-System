@@ -4,6 +4,8 @@ import os
 import sys
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
+from sqlalchemy import text
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -17,11 +19,34 @@ def _mock_engine(cursor):
     """Build a mock engine whose connect/begin return a context-manager con."""
     mock_conn = MagicMock()
     mock_conn.__enter__.return_value = mock_conn
-    mock_conn.execute.return_value = cursor
+    mock_conn.__exit__.return_value = None
+    mock_conn.__aenter__.return_value = mock_conn
+    mock_conn.__aexit__.return_value = None
+    mock_conn.execute = AsyncMock(return_value=cursor)
     mock_engine = MagicMock()
     mock_engine.connect.return_value = mock_conn
     mock_engine.begin.return_value = mock_conn
     return mock_engine
+
+
+def _alerts_cursor():
+    """Create a cursor mock that returns the expected alerts data."""
+    c = MagicMock()
+    c.scalar.return_value = 1
+    c.fetchall.return_value = [
+        [
+            1,
+            "GAME-001",
+            "NYY",
+            "sharp_money",
+            0.85,
+            "Sharp Money detectado",
+            "2026-05-20T12:00:00",
+            0,
+        ],
+    ]
+    c.fetchone.return_value = None
+    return c
 
 
 client = TestClient(app)
@@ -111,7 +136,7 @@ class TestGetAlerts:
         ]
         mock_cursor.fetchone.return_value = None
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/")
 
         assert resp.status_code == 200
@@ -128,7 +153,7 @@ class TestGetAlerts:
         mock_cursor.scalar.return_value = 0
         mock_cursor.fetchall.return_value = []
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/?unread_only=true")
 
         assert resp.status_code == 200
@@ -138,7 +163,7 @@ class TestGetAlerts:
         mock_cursor.scalar.return_value = 0
         mock_cursor.fetchall.return_value = []
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/?limit=5")
 
         assert resp.status_code == 200
@@ -148,7 +173,7 @@ class TestGetAlerts:
         mock_cursor.scalar.return_value = 0
         mock_cursor.fetchall.return_value = []
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/")
 
         assert resp.status_code == 200
@@ -176,7 +201,7 @@ class TestGetAlert:
             1,
         ]
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/1")
 
         assert resp.status_code == 200
@@ -188,7 +213,7 @@ class TestGetAlert:
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.get("/api/v1/alerts/999")
 
         assert resp.status_code == 404
@@ -204,7 +229,7 @@ class TestMarkAlertRead:
     def test_marks_alert_as_read(self):
         mock_cursor = MagicMock()
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.post("/api/v1/alerts/1/read")
 
         assert resp.status_code == 200
@@ -220,7 +245,7 @@ class TestMarkAllRead:
     def test_marks_all_as_read(self):
         mock_cursor = MagicMock()
 
-        with patch("api.database.get_engine", return_value=_mock_engine(mock_cursor)):
+        with patch("api.routers.alerts.get_async_engine", return_value=_mock_engine(mock_cursor)):
             resp = client.post("/api/v1/alerts/read-all")
 
         assert resp.status_code == 200

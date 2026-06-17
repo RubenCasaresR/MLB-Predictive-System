@@ -26,6 +26,7 @@ class ExposureLimit:
     max_per_day: float = 2500.0
     max_per_week: float = 10000.0
     max_per_sportsbook: float = 5000.0
+    max_per_game: float = 1000.0
     max_drawdown: float = 0.20
     max_concurrent_bets: int = 10
 
@@ -42,7 +43,24 @@ class PersistentBankrollManager(BaseBankrollManager):
         self.user_id = user_id
         self.engine = create_engine(db_url) if db_url else None
         self.limits = ExposureLimit()
+        self._game_exposures: Dict[str, float] = {}
         logger.info(f"PersistentBankrollManager for user {user_id}")
+
+    def status(self) -> dict:
+        base = super().status()
+        base["updated_at"] = datetime.fromisoformat("2025-01-01T00:00:00")
+        if self.engine:
+            try:
+                with self.engine.connect() as conn:
+                    row = conn.execute(
+                        text("SELECT updated_at FROM bankroll_state WHERE user_id = :uid"),
+                        {"uid": self.user_id},
+                    ).fetchone()
+                    if row and row[0]:
+                        base["updated_at"] = row[0]
+            except Exception:
+                logger.debug("Could not read updated_at from bankroll_state", exc_info=True)
+        return base
 
     def save_state(self):
         if not self.engine:
@@ -69,11 +87,18 @@ class PersistentBankrollManager(BaseBankrollManager):
                 },
             )
 
+    def record_bet(self, stake: float, odds: int, result: bool, game_id: str = ""):
+        super().record_bet(stake, odds, result)
+        if game_id:
+            current = self._game_exposures.get(game_id, 0.0)
+            self._game_exposures[game_id] = current + stake
+
     def check_exposure(
         self,
         stake: float,
         sportsbook: str = "",
         bet_date: date = None,
+        game_id: str = "",
     ) -> dict:
 
         if bet_date is None:
@@ -96,6 +121,14 @@ class PersistentBankrollManager(BaseBankrollManager):
             violations.append(
                 f"Daily total ${daily_total + stake:.2f} exceeds ${self.limits.max_per_day:.2f}"
             )
+
+        if game_id:
+            game_total = self._game_exposures.get(game_id, 0.0)
+            if game_total + stake > self.limits.max_per_game:
+                violations.append(
+                    f"Game total ${game_total + stake:.2f} exceeds "
+                    f"max per game ${self.limits.max_per_game:.2f}"
+                )
 
         recent_bets = [b for b in self.bet_history if b.get("won") is False]
         recent_losses = sum(b["stake"] for b in recent_bets[-5:])

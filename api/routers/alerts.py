@@ -11,8 +11,10 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import text
 
 from api.auth import get_current_user
+from api.database import get_async_engine
 from api.models.pydantic_models import AlertListResponse, AlertResponse
 
 logger = logging.getLogger(__name__)
@@ -54,17 +56,13 @@ async def get_alerts(
     limit: int = Query(50, ge=1, le=200),
     current_user: dict = Depends(get_current_user),
 ):
-    from sqlalchemy import text
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        total_result = await conn.execute(text("SELECT COUNT(*) FROM alerts"))
+        total = total_result.scalar() or 0
 
-    from api.database import get_engine
-
-    engine = get_engine()
-    with engine.connect() as conn:
-        total = conn.execute(text("SELECT COUNT(*) FROM alerts")).scalar() or 0
-
-        unread = (
-            conn.execute(text("SELECT COUNT(*) FROM alerts WHERE is_read = FALSE")).scalar() or 0
-        )
+        unread_result = await conn.execute(text("SELECT COUNT(*) FROM alerts WHERE is_read = FALSE"))
+        unread = unread_result.scalar() or 0
 
         query = "SELECT alert_id, game_id, team_id, signal_type, confidence, message, created_at, is_read FROM alerts"
         params = {}
@@ -73,7 +71,8 @@ async def get_alerts(
         query += " ORDER BY created_at DESC LIMIT :lim"
         params["lim"] = limit
 
-        rows = conn.execute(text(query), params).fetchall()
+        result = await conn.execute(text(query), params)
+        rows = result.fetchall()
 
     alerts = [
         AlertResponse(
@@ -97,18 +96,15 @@ async def get_alert(
     alert_id: int,
     current_user: dict = Depends(get_current_user),
 ):
-    from sqlalchemy import text
-
-    from api.database import get_engine
-
-    engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text(
                 "SELECT alert_id, game_id, team_id, signal_type, confidence, message, created_at, is_read FROM alerts WHERE alert_id = :aid"
             ),
             {"aid": alert_id},
-        ).fetchone()
+        )
+        row = result.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -130,13 +126,9 @@ async def mark_alert_read(
     alert_id: int,
     current_user: dict = Depends(get_current_user),
 ):
-    from sqlalchemy import text
-
-    from api.database import get_engine
-
-    engine = get_engine()
-    with engine.begin() as conn:
-        conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.begin() as conn:
+        await conn.execute(
             text("UPDATE alerts SET is_read = TRUE WHERE alert_id = :aid"),
             {"aid": alert_id},
         )
@@ -147,13 +139,9 @@ async def mark_alert_read(
 async def mark_all_read(
     current_user: dict = Depends(get_current_user),
 ):
-    from sqlalchemy import text
-
-    from api.database import get_engine
-
-    engine = get_engine()
-    with engine.begin() as conn:
-        conn.execute(text("UPDATE alerts SET is_read = TRUE WHERE is_read = FALSE"))
+    async_engine = get_async_engine()
+    async with async_engine.begin() as conn:
+        await conn.execute(text("UPDATE alerts SET is_read = TRUE WHERE is_read = FALSE"))
     return {"status": "ok"}
 
 

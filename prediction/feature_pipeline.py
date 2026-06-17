@@ -34,19 +34,6 @@ class FeaturePipeline:
         with self.engine.begin() as conn:
             conn.execute(
                 text("""
-                DELETE FROM player_rolling_stats WHERE (player_id, game_id) IN (
-                    SELECT ab.pitcher_id, g.game_id
-                    FROM games g
-                    JOIN at_bats ab ON ab.game_id = g.game_id
-                    WHERE g.game_date BETWEEN :start AND :end
-                      AND g.status = 'FINAL'
-                      AND ab.pitcher_id IS NOT NULL
-                )
-                """),
-                {"start": start_date, "end": target_date},
-            )
-            conn.execute(
-                text("""
                 INSERT INTO player_rolling_stats (
                     player_id, game_id, as_of_date,
                     woba_30d, fip_30d, k_per_9_30d, bb_per_9_30d, hr_per_9_30d,
@@ -91,29 +78,24 @@ class FeaturePipeline:
                   AND g.status = 'FINAL'
                   AND ab.pitcher_id IS NOT NULL
                 GROUP BY ab.pitcher_id, g.game_id, g.game_date
+                ON CONFLICT (player_id, game_id) DO UPDATE SET
+                    as_of_date = EXCLUDED.as_of_date,
+                    woba_30d = EXCLUDED.woba_30d,
+                    fip_30d = EXCLUDED.fip_30d,
+                    k_per_9_30d = EXCLUDED.k_per_9_30d,
+                    bb_per_9_30d = EXCLUDED.bb_per_9_30d,
+                    hr_per_9_30d = EXCLUDED.hr_per_9_30d,
+                    avg_velo_30d = EXCLUDED.avg_velo_30d,
+                    whiff_pct_30d = EXCLUDED.whiff_pct_30d
                 """),
                 {"start": start_date, "end": target_date},
             )
-
         logger.info("Player rolling stats computed")
 
     def compute_batter_rolling_stats(self, target_date: date):
         logger.info(f"Computing batter rolling stats for {target_date}")
         start_date = target_date - timedelta(days=30)
         with self.engine.begin() as conn:
-            conn.execute(
-                text("""
-                DELETE FROM batter_rolling_stats WHERE (player_id, game_id) IN (
-                    SELECT ab.batter_id, g.game_id
-                    FROM games g
-                    JOIN at_bats ab ON ab.game_id = g.game_id
-                    WHERE g.game_date BETWEEN :start AND :end
-                      AND g.status = 'FINAL'
-                      AND ab.batter_id IS NOT NULL
-                )
-                """),
-                {"start": start_date, "end": target_date},
-            )
             conn.execute(
                 text("""
                 INSERT INTO batter_rolling_stats (
@@ -154,6 +136,14 @@ class FeaturePipeline:
                   AND g.status = 'FINAL'
                   AND ab.batter_id IS NOT NULL
                 GROUP BY ab.batter_id, g.game_id, g.game_date
+                ON CONFLICT (player_id, game_id) DO UPDATE SET
+                    as_of_date = EXCLUDED.as_of_date,
+                    woba_30d = EXCLUDED.woba_30d,
+                    k_pct_30d = EXCLUDED.k_pct_30d,
+                    bb_pct_30d = EXCLUDED.bb_pct_30d,
+                    hr_per_9_30d = EXCLUDED.hr_per_9_30d,
+                    groundball_pct_30d = EXCLUDED.groundball_pct_30d,
+                    flyball_pct_30d = EXCLUDED.flyball_pct_30d
                 """),
                 {"start": start_date, "end": target_date},
             )
@@ -163,26 +153,6 @@ class FeaturePipeline:
         logger.info(f"Computing team rolling stats for {target_date}")
         start_date = target_date - timedelta(days=30)
         with self.engine.begin() as conn:
-            conn.execute(
-                text("""
-                DELETE FROM team_rolling_stats WHERE (team_id, game_id) IN (
-                    SELECT DISTINCT team_id, game_id FROM (
-                        SELECT g.home_team_id AS team_id, g.game_id
-                        FROM games g
-                        JOIN at_bats ab ON ab.game_id = g.game_id
-                        WHERE g.game_date BETWEEN :start AND :end
-                          AND g.status = 'FINAL'
-                        UNION
-                        SELECT g.away_team_id, g.game_id
-                        FROM games g
-                        JOIN at_bats ab ON ab.game_id = g.game_id
-                        WHERE g.game_date BETWEEN :start AND :end
-                          AND g.status = 'FINAL'
-                    )
-                )
-                """),
-                {"start": start_date, "end": target_date},
-            )
             conn.execute(
                 text("""
                 INSERT INTO team_rolling_stats (team_id, game_id, as_of_date, woba_30d)
@@ -216,6 +186,9 @@ class FeaturePipeline:
                       AND g.status = 'FINAL'
                 ) team_events
                 GROUP BY team_id, game_id, game_date
+                ON CONFLICT (team_id, game_id) DO UPDATE SET
+                    as_of_date = EXCLUDED.as_of_date,
+                    woba_30d = EXCLUDED.woba_30d
             """),
                 {"start": start_date, "end": target_date},
             )
@@ -223,68 +196,54 @@ class FeaturePipeline:
             conn.execute(
                 text("""
                 INSERT INTO team_rolling_stats (team_id, game_id, as_of_date, bullpen_era_30d, bullpen_fip_30d)
-                WITH team_pitchers AS (
-                    SELECT
-                        ab.game_id,
-                        g.game_date,
-                        CASE WHEN ab.half_inning = 'T' THEN g.home_team_id ELSE g.away_team_id END AS team_id,
-                        ab.pitcher_id,
-                        FIRST_VALUE(ab.pitcher_id) OVER (
-                            PARTITION BY ab.game_id,
-                                CASE WHEN ab.half_inning = 'T' THEN g.home_team_id ELSE g.away_team_id END
-                            ORDER BY ab.ab_id
-                        ) AS starter_pitcher_id
-                    FROM games g
-                    JOIN at_bats ab ON ab.game_id = g.game_id
-                    WHERE g.game_date BETWEEN :start AND :end
-                      AND g.status = 'FINAL'
-                      AND ab.pitcher_id IS NOT NULL
-                ),
-                relief_at_bats AS (
-                    SELECT
-                        tp.team_id,
-                        tp.game_id,
-                        tp.game_date,
-                        ab.events,
-                        CASE WHEN tp.team_id = g.home_team_id
-                             THEN ab.away_score_after - ab.away_score_before
-                             ELSE ab.home_score_after - ab.home_score_before
-                        END AS runs
-                    FROM team_pitchers tp
-                    JOIN at_bats ab ON ab.game_id = tp.game_id AND ab.pitcher_id = tp.pitcher_id
-                    JOIN games g ON g.game_id = ab.game_id
-                    WHERE tp.pitcher_id != tp.starter_pitcher_id
-                ),
-                relief_stats AS (
-                    SELECT
-                        team_id,
-                        game_id,
-                        game_date,
-                        SUM(CASE WHEN events IN ('Strikeout','Strikeout Double Play') THEN 1 ELSE 0 END) AS k,
-                        SUM(CASE WHEN events IN ('Walk','Intent Walk','Hit By Pitch') THEN 1 ELSE 0 END) AS bb_hbp,
-                        SUM(CASE WHEN events = 'Home Run' THEN 1 ELSE 0 END) AS hr,
-                        SUM(CASE WHEN events IN ('Strikeout','Strikeout Double Play','Field Out','Forceout',
-                                                    'Grounded Into DP','Sac Fly','Sac Bunt','Double Play',
-                                                    'Triple Play','Fielders Choice Out') THEN 1 ELSE 0 END) AS outs,
-                        SUM(runs) AS runs
-                    FROM relief_at_bats
-                    GROUP BY team_id, game_id, game_date
-                )
                 SELECT
                     team_id, game_id, game_date,
-                    CASE WHEN ROUND(COALESCE(CAST(runs AS NUMERIC) / NULLIF(CAST(outs AS NUMERIC) / 3.0, 0), 0), 2) < 99.99
-                        THEN ROUND(COALESCE(CAST(runs AS NUMERIC) / NULLIF(CAST(outs AS NUMERIC) / 3.0, 0), 0), 2)
-                        ELSE 99.99 END AS bullpen_era,
-                    CASE WHEN ROUND(COALESCE(
-                        CAST(13.0 * hr + 3.0 * bb_hbp - 2.0 * k AS NUMERIC) / NULLIF(CAST(outs AS NUMERIC) / 3.0, 0) + 3.10,
-                        4.50
-                    ), 2) < 99.99
-                        THEN ROUND(COALESCE(
-                        CAST(13.0 * hr + 3.0 * bb_hbp - 2.0 * k AS NUMERIC) / NULLIF(CAST(outs AS NUMERIC) / 3.0, 0) + 3.10,
-                        4.50
-                    ), 2)
-                        ELSE 99.99 END AS bullpen_fip
-                FROM relief_stats
+                    CASE WHEN ROUND(CAST(SUM(runs) AS REAL) / NULLIF(CAST(SUM(rel_outs) AS REAL) / 3.0, 0), 2) < 99.99
+                        THEN ROUND(CAST(SUM(runs) AS REAL) / NULLIF(CAST(SUM(rel_outs) AS REAL) / 3.0, 0), 2)
+                        ELSE 99.99 END,
+                    CASE WHEN ROUND((13.0 * SUM(hr) + 3.0 * SUM(bb_hbp) - 2.0 * SUM(k))
+                            / NULLIF(CAST(SUM(rel_outs) AS REAL) / 3.0, 0) + 3.10, 2) < 99.99
+                        THEN ROUND((13.0 * SUM(hr) + 3.0 * SUM(bb_hbp) - 2.0 * SUM(k))
+                            / NULLIF(CAST(SUM(rel_outs) AS REAL) / 3.0, 0) + 3.10, 2)
+                        ELSE 99.99 END
+                FROM (
+                    SELECT
+                        tp.team_id, tp.game_id, tp.game_date, ab.events,
+                        CASE WHEN tp.team_id = g2.home_team_id
+                             THEN ab.away_score_after - ab.away_score_before
+                             ELSE ab.home_score_after - ab.home_score_before
+                        END AS runs,
+                        CASE WHEN ab.events IN ('Strikeout','Strikeout Double Play') THEN 1 ELSE 0 END AS k,
+                        CASE WHEN ab.events IN ('Walk','Intent Walk','Hit By Pitch') THEN 1 ELSE 0 END AS bb_hbp,
+                        CASE WHEN ab.events = 'Home Run' THEN 1 ELSE 0 END AS hr,
+                        CASE WHEN ab.events IN ('Strikeout','Strikeout Double Play','Field Out','Forceout',
+                            'Grounded Into DP','Sac Fly','Sac Bunt','Double Play',
+                            'Triple Play','Fielders Choice Out') THEN 1 ELSE 0 END AS rel_outs
+                    FROM (
+                        SELECT
+                            ab.game_id, g.game_date,
+                            CASE WHEN ab.half_inning = 'T' THEN g.home_team_id ELSE g.away_team_id END AS team_id,
+                            ab.pitcher_id,
+                            FIRST_VALUE(ab.pitcher_id) OVER (
+                                PARTITION BY ab.game_id,
+                                    CASE WHEN ab.half_inning = 'T' THEN g.home_team_id ELSE g.away_team_id END
+                                ORDER BY ab.ab_id
+                            ) AS starter_pitcher_id
+                        FROM games g
+                        JOIN at_bats ab ON ab.game_id = g.game_id
+                        WHERE g.game_date BETWEEN :start AND :end
+                          AND g.status = 'FINAL'
+                          AND ab.pitcher_id IS NOT NULL
+                    ) tp
+                    JOIN at_bats ab ON ab.game_id = tp.game_id AND ab.pitcher_id = tp.pitcher_id
+                    JOIN games g2 ON g2.game_id = ab.game_id
+                    WHERE tp.pitcher_id != tp.starter_pitcher_id
+                )
+                GROUP BY team_id, game_id, game_date
+                ON CONFLICT (team_id, game_id) DO UPDATE SET
+                    as_of_date = EXCLUDED.as_of_date,
+                    bullpen_era_30d = EXCLUDED.bullpen_era_30d,
+                    bullpen_fip_30d = EXCLUDED.bullpen_fip_30d
             """),
                 {"start": start_date, "end": target_date},
             )
@@ -389,9 +348,12 @@ class FeaturePipeline:
         logger.info("Feature pipeline complete")
 
     def _compute_woba_windows(self, target_date: date):
+        valid_windows = {"woba_7d", "woba_14d"}
         for window in [7, 14]:
             start = target_date - timedelta(days=window)
             col = f"woba_{window}d"
+            if col not in valid_windows:
+                raise ValueError(f"Invalid window column: {col}")
             with self.engine.begin() as conn:
                 conn.execute(
                     text(f"""

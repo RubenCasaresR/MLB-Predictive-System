@@ -289,9 +289,19 @@ class MonteCarloMLBSimulator:
         "bullpen_fip_30d": 4.50,
     }
 
-    def __init__(self, model_path: str | None = None, seed: int | None = None):
+    _DEFAULT_LEAGUE_PROBS: np.ndarray = np.array([0.310, 0.155, 0.045, 0.005, 0.030, 0.085, 0.010, 0.045])
+
+    def __init__(
+        self,
+        model_path: str | None = None,
+        seed: int | None = None,
+        league_avg_probs: np.ndarray | None = None,
+    ):
         self.rng = np.random.default_rng(seed)
         self._model: CatBoostClassifier | None = None
+        self._fallback_probs: np.ndarray = (
+            league_avg_probs if league_avg_probs is not None else self._DEFAULT_LEAGUE_PROBS
+        )
         load_path = model_path or self.MODEL_PATH
         try:
             self._model = CatBoostClassifier()
@@ -384,34 +394,59 @@ class MonteCarloMLBSimulator:
         return self._heuristic_fallback(feature_vec)
 
     def _heuristic_fallback(self, _feature_vec: pd.DataFrame) -> np.ndarray:
-        probs = np.array([0.310, 0.155, 0.045, 0.005, 0.030, 0.085, 0.010, 0.045])
-        return probs / probs.sum()
+        return self._fallback_probs / self._fallback_probs.sum()
 
     # ------------------------------------------------------------------
     # MÉTODO PRINCIPAL
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_bullpen_state(original: PitcherState, bullpen_fip: float) -> PitcherState:
+    def _make_high_leverage_bullpen_state(original: PitcherState, bullpen_fip: float) -> PitcherState:
+        hl_fip = bullpen_fip * 0.92
         return PitcherState(
             player_id=0,
-            name=f"Bullpen_{original.name.split('_')[0]}",
+            name=f"HLBullpen_{original.name.split('_')[0]}",
             throws=original.throws,
-            k_rate=0.230,
-            bb_rate=0.090,
-            hr_rate=0.032,
-            groundball_rate=0.420,
-            whiff_pct=0.120,
-            avg_velo=94.0,
-            avg_spin=2300.0,
+            k_rate=0.260,
+            bb_rate=0.075,
+            hr_rate=0.028,
+            groundball_rate=0.440,
+            whiff_pct=0.140,
+            avg_velo=95.5,
+            avg_spin=2400.0,
             fatigue_factor=1.0,
             pitch_count=0,
-            k_per_9_30d=9.0,
-            bb_per_9_30d=3.5,
-            hr_per_9_30d=1.3,
-            fip_30d=bullpen_fip,
-            avg_velo_30d=94.0,
-            whiff_pct_30d=25.0,
+            k_per_9_30d=10.5,
+            bb_per_9_30d=2.8,
+            hr_per_9_30d=1.1,
+            fip_30d=hl_fip,
+            avg_velo_30d=95.5,
+            whiff_pct_30d=28.0,
+            is_bullpen=True,
+        )
+
+    @staticmethod
+    def _make_low_leverage_bullpen_state(original: PitcherState, bullpen_fip: float) -> PitcherState:
+        ll_fip = bullpen_fip * 1.10
+        return PitcherState(
+            player_id=0,
+            name=f"LLBullpen_{original.name.split('_')[0]}",
+            throws=original.throws,
+            k_rate=0.200,
+            bb_rate=0.100,
+            hr_rate=0.035,
+            groundball_rate=0.400,
+            whiff_pct=0.100,
+            avg_velo=92.0,
+            avg_spin=2150.0,
+            fatigue_factor=1.0,
+            pitch_count=0,
+            k_per_9_30d=7.5,
+            bb_per_9_30d=4.2,
+            hr_per_9_30d=1.5,
+            fip_30d=ll_fip,
+            avg_velo_30d=92.0,
+            whiff_pct_30d=22.0,
             is_bullpen=True,
         )
 
@@ -486,8 +521,10 @@ class MonteCarloMLBSimulator:
         progress_callback: Callable | None = None,
     ) -> SimulationResult:
 
-        bp_home = self._make_bullpen_state(home_pitcher, home_bullpen_fip_30d)
-        bp_away = self._make_bullpen_state(away_pitcher, away_bullpen_fip_30d)
+        bp_hl_home = self._make_high_leverage_bullpen_state(home_pitcher, home_bullpen_fip_30d)
+        bp_ll_home = self._make_low_leverage_bullpen_state(home_pitcher, home_bullpen_fip_30d)
+        bp_hl_away = self._make_high_leverage_bullpen_state(away_pitcher, away_bullpen_fip_30d)
+        bp_ll_away = self._make_low_leverage_bullpen_state(away_pitcher, away_bullpen_fip_30d)
 
         ctx = dict(
             stadium_id=stadium_id,
@@ -511,9 +548,19 @@ class MonteCarloMLBSimulator:
             is_bullpen_active=0,
             **ctx,
         )
-        away_bullpen_probs = self._precompute_probs(
+        away_hl_bullpen_probs = self._precompute_probs(
             away_lineup,
-            bp_home,
+            bp_hl_home,
+            inning=7,
+            outs_before=0,
+            half_inning="T",
+            bullpen_fip_30d=away_bullpen_fip_30d,
+            is_bullpen_active=1,
+            **ctx,
+        )
+        away_ll_bullpen_probs = self._precompute_probs(
+            away_lineup,
+            bp_ll_home,
             inning=7,
             outs_before=0,
             half_inning="T",
@@ -531,9 +578,19 @@ class MonteCarloMLBSimulator:
             is_bullpen_active=0,
             **ctx,
         )
-        home_bullpen_probs = self._precompute_probs(
+        home_hl_bullpen_probs = self._precompute_probs(
             home_lineup,
-            bp_away,
+            bp_hl_away,
+            inning=7,
+            outs_before=0,
+            half_inning="B",
+            bullpen_fip_30d=home_bullpen_fip_30d,
+            is_bullpen_active=1,
+            **ctx,
+        )
+        home_ll_bullpen_probs = self._precompute_probs(
+            home_lineup,
+            bp_ll_away,
             inning=7,
             outs_before=0,
             half_inning="B",
@@ -551,6 +608,16 @@ class MonteCarloMLBSimulator:
 
         logger.info(f"Running {n_iterations} Monte Carlo iterations...")
 
+        def _is_high_leverage(state: GameState) -> bool:
+            diff = abs(state.home_score - state.away_score)
+            if state.inning >= 7 and diff <= 3:
+                return True
+            if state.inning >= 9 and diff <= 2:
+                return True
+            if state.inning > self.MAX_INNINGS:
+                return True
+            return False
+
         for it in range(n_iterations):
             state = GameState()
             sim_home_p = PitcherState(**home_pitcher.__dict__)
@@ -565,11 +632,15 @@ class MonteCarloMLBSimulator:
                     while state.outs < self.OUTS_PER_HALF:
                         batter_idx = away_idx % 9
                         use_bullpen = int(sim_home_p.pitch_count > 85 or state.inning >= 7)
-                        bp = (
-                            away_bullpen_probs[batter_idx]
-                            if use_bullpen
-                            else away_starter_probs[batter_idx]
-                        )
+                        if use_bullpen:
+                            hl = _is_high_leverage(state)
+                            bp = (
+                                away_hl_bullpen_probs[batter_idx]
+                                if hl
+                                else away_ll_bullpen_probs[batter_idx]
+                            )
+                        else:
+                            bp = away_starter_probs[batter_idx]
                         outcome = self._sample_outcome(bp)
                         self._apply_outcome(outcome, state, bp, is_home=False)
                         sim_home_p.pitch_count += 1
@@ -584,11 +655,15 @@ class MonteCarloMLBSimulator:
                     while state.outs < self.OUTS_PER_HALF:
                         batter_idx = home_idx % 9
                         use_bullpen = int(sim_away_p.pitch_count > 85 or state.inning >= 7)
-                        bp = (
-                            home_bullpen_probs[batter_idx]
-                            if use_bullpen
-                            else home_starter_probs[batter_idx]
-                        )
+                        if use_bullpen:
+                            hl = _is_high_leverage(state)
+                            bp = (
+                                home_hl_bullpen_probs[batter_idx]
+                                if hl
+                                else home_ll_bullpen_probs[batter_idx]
+                            )
+                        else:
+                            bp = home_starter_probs[batter_idx]
                         outcome = self._sample_outcome(bp)
                         self._apply_outcome(outcome, state, bp, is_home=True)
                         sim_away_p.pitch_count += 1

@@ -5,11 +5,14 @@
 # =============================================================================
 
 import logging
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 
 from api.auth import get_current_user
+from api.database import get_async_engine
 from api.models.pydantic_models import BankrollResponse, ExposureResponse
 
 logger = logging.getLogger(__name__)
@@ -37,7 +40,7 @@ async def get_bankroll_status():
         total_return_pct=status["total_return"],
         sharpe_ratio=status["sharpe_ratio"],
         bet_count=status["bet_count"],
-        updated_at="2025-01-01T00:00:00",
+        updated_at=status.get("updated_at", datetime.fromisoformat("2025-01-01T00:00:00")),
     )
 
 
@@ -96,32 +99,30 @@ async def get_risk_limits():
 
 @router.get("/exposure/summary")
 async def get_exposure_summary():
-    from sqlalchemy import text
-
-    from api.database import get_engine
-
-    engine = get_engine()
-
-    with engine.connect() as conn:
-        by_sportsbook = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        by_sportsbook_result = await conn.execute(
             text("""
                 SELECT COALESCE(sportsbook, 'unknown'), SUM(stake)
                 FROM bet_history WHERE won IS NULL
                 GROUP BY sportsbook
             """)
-        ).fetchall()
+        )
+        by_sportsbook = by_sportsbook_result.fetchall()
 
-        by_game = conn.execute(
+        by_game_result = await conn.execute(
             text("""
                 SELECT COALESCE(game_id, 'unknown'), SUM(stake)
                 FROM bet_history WHERE won IS NULL
                 GROUP BY game_id
             """)
-        ).fetchall()
+        )
+        by_game = by_game_result.fetchall()
 
-        total = conn.execute(
+        total_result = await conn.execute(
             text("SELECT COALESCE(SUM(stake), 0) FROM bet_history WHERE won IS NULL")
-        ).scalar()
+        )
+        total = total_result.scalar()
 
     return {
         "total_exposed": float(total),

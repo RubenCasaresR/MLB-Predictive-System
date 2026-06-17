@@ -15,6 +15,41 @@ from api.models.pydantic_models import SimulationRequest, SimulationResponse
 logger = logging.getLogger(__name__)
 
 
+def _fetch_league_avg_probs(sync_engine) -> np.ndarray | None:
+    try:
+        import numpy as np
+        from sqlalchemy import text
+
+        with sync_engine.connect() as conn:
+            row = conn.execute(
+                text("""
+                    SELECT
+                        COALESCE(AVG(prs.k_per_9_30d) / 27.0, 0.225) AS league_k_rate,
+                        COALESCE(AVG(prs.bb_per_9_30d) / 27.0, 0.085) AS league_bb_rate,
+                        COALESCE(AVG(prs.hr_per_9_30d) / 27.0, 0.030) AS league_hr_rate
+                    FROM player_rolling_stats prs
+                    WHERE prs.k_per_9_30d IS NOT NULL
+                      AND prs.as_of_date >= CURRENT_DATE - 30
+                """),
+            ).fetchone()
+        k_rate = float(row[0]) if row and row[0] else 0.225
+        bb_rate = float(row[1]) if row and row[1] else 0.085
+        hr_rate = float(row[2]) if row and row[2] else 0.030
+
+        single_rate = 0.155
+        double_rate = 0.045
+        triple_rate = 0.005
+        hbp_rate = 0.010
+        sac_rate = 0.045
+        out_rate = max(0.0, 1.0 - k_rate - bb_rate - hr_rate - single_rate - double_rate - triple_rate - hbp_rate - sac_rate)
+
+        probs = np.array([out_rate, single_rate, double_rate, triple_rate, hr_rate, bb_rate, hbp_rate, sac_rate])
+        return probs / probs.sum()
+    except Exception as e:
+        logger.warning(f"Could not fetch league avg probs: {e}")
+        return None
+
+
 def _parse_game_id_date(game_id: str) -> date:
     s = game_id[-6:]
     return date(2000 + int(s[0:2]), int(s[2:4]), int(s[4:6]))
@@ -28,52 +63,35 @@ class SimulationService:
     async def run_simulation(self, request: SimulationRequest) -> SimulationResponse:
         from sqlalchemy import text
 
-        from api.database import get_engine
+        from api.database import get_async_engine, get_engine
         from prediction.monte_carlo_simulator import MonteCarloMLBSimulator
         from prediction.player_state_builder import (
-            _build_placeholder_lineup,
             _fetch_pitcher_state,
             _fetch_team_lineup,
         )
 
-        engine = get_engine()
+        sync_engine = get_engine()
         target_date = _parse_game_id_date(request.game_id)
 
-        home_lineup = _fetch_team_lineup(engine, request.home_team_id, target_date)
-        away_lineup = _fetch_team_lineup(engine, request.away_team_id, target_date)
-
-        if len(home_lineup) < 9:
-            home_lineup.extend(
-                _build_placeholder_lineup(
-                    request.home_team_id,
-                    0.310,
-                    9 - len(home_lineup),
-                )
-            )
-        if len(away_lineup) < 9:
-            away_lineup.extend(
-                _build_placeholder_lineup(
-                    request.away_team_id,
-                    0.310,
-                    9 - len(away_lineup),
-                )
-            )
+        home_lineup = _fetch_team_lineup(sync_engine, request.home_team_id, target_date)
+        away_lineup = _fetch_team_lineup(sync_engine, request.away_team_id, target_date)
 
         home_pitcher = _fetch_pitcher_state(
-            engine, request.home_pitcher_id if request.home_pitcher_id else 0, target_date
+            sync_engine, request.home_pitcher_id if request.home_pitcher_id else 0, target_date
         )
         away_pitcher = _fetch_pitcher_state(
-            engine, request.away_pitcher_id if request.away_pitcher_id else 0, target_date
+            sync_engine, request.away_pitcher_id if request.away_pitcher_id else 0, target_date
         )
 
-        ctx = self._fetch_game_context(engine, request.game_id, request.home_team_id, request.away_team_id, target_date)
+        ctx = await self._fetch_game_context(request.game_id, request.home_team_id, request.away_team_id, target_date)
 
         def progress(current, total):
             if current % 1000 == 0:
                 logger.info(f"Simulating {request.game_id}: {current}/{total}")
 
         loop = asyncio.get_event_loop()
-        sim = MonteCarloMLBSimulator(seed=42)
+        league_probs = _fetch_league_avg_probs(sync_engine)
+        sim = MonteCarloMLBSimulator(seed=42, league_avg_probs=league_probs)
 
         result = await loop.run_in_executor(
             None,
@@ -123,9 +141,10 @@ class SimulationService:
             computed_at=now,
         )
 
-        # Persist to DB
-        with engine.begin() as conn:
-            conn.execute(
+        # Persist to DB (async)
+        async_engine = get_async_engine()
+        async with async_engine.begin() as conn:
+            await conn.execute(
                 text("""
                     INSERT INTO simulation_results
                         (game_id, home_win_prob, away_win_prob,
@@ -178,8 +197,10 @@ class SimulationService:
         )
         return response
 
-    def _fetch_game_context(self, engine, game_id: str, home_team_id: str, away_team_id: str, game_date: date) -> dict:
+    async def _fetch_game_context(self, game_id: str, home_team_id: str, away_team_id: str, game_date: date) -> dict:
         from sqlalchemy import text
+
+        from api.database import get_async_engine
 
         ctx: dict = {
             "pf_hr": 1.0,
@@ -203,8 +224,9 @@ class SimulationService:
             "away_tz_crossings": 0,
         }
         try:
-            with engine.connect() as conn:
-                f = conn.execute(
+            async_engine = get_async_engine()
+            async with async_engine.connect() as conn:
+                f_result = await conn.execute(
                     text("""
                         SELECT
                             park_hr_factor, park_woba_factor, park_k_factor,
@@ -216,7 +238,8 @@ class SimulationService:
                         WHERE game_id = :gid
                     """),
                     {"gid": game_id},
-                ).fetchone()
+                )
+                f = f_result.fetchone()
                 if f:
                     ctx.update({
                         "pf_hr": float(f.park_hr_factor) if f.park_hr_factor else 1.0,
@@ -232,17 +255,18 @@ class SimulationService:
                         "away_travel_miles": int(f.away_travel_miles) if f.away_travel_miles else 0,
                     })
 
-                gi = conn.execute(
+                gi_result = await conn.execute(
                     text("SELECT venue_id, home_plate_umpire_id FROM games WHERE game_id = :gid"),
                     {"gid": game_id},
-                ).fetchone()
+                )
+                gi = gi_result.fetchone()
                 if gi:
                     ctx["stadium_id"] = int(gi[0]) if gi[0] else 0
                     ctx["umpire_id"] = int(gi[1]) if gi[1] else 0
 
                 for side, tid in [("home", home_team_id), ("away", away_team_id)]:
                     if tid:
-                        bp = conn.execute(
+                        bp_result = await conn.execute(
                             text("""
                                 SELECT bullpen_era_30d, bullpen_fip_30d
                                 FROM team_rolling_stats
@@ -250,7 +274,8 @@ class SimulationService:
                                 ORDER BY as_of_date DESC LIMIT 1
                             """),
                             {"tid": tid, "gd": game_date.isoformat()},
-                        ).fetchone()
+                        )
+                        bp = bp_result.fetchone()
                         if bp:
                             ctx[f"{side}_bp_era"] = float(bp[0]) if bp[0] else 4.50
                             ctx[f"{side}_bp_fip"] = float(bp[1]) if bp[1] else 4.50

@@ -103,10 +103,13 @@ class TestIngestGameWeather:
         with engine.begin() as conn:
             conn.execute(
                 text("""
-                CREATE TABLE IF NOT EXISTS stadiums (stadium_id INTEGER PRIMARY KEY, name TEXT)
+                CREATE TABLE IF NOT EXISTS stadiums (
+                    stadium_id INTEGER PRIMARY KEY, name TEXT,
+                    roof_type VARCHAR(10) DEFAULT 'open'
+                )
             """)
             )
-            conn.execute(text("INSERT INTO stadiums VALUES (999, 'Unknown Park')"))
+            conn.execute(text("INSERT INTO stadiums VALUES (999, 'Unknown Park', 'open')"))
             conn.execute(
                 text("""
                 CREATE TABLE IF NOT EXISTS weather_hourly (
@@ -135,6 +138,15 @@ class TestIngestGameWeather:
                 )
             """)
             )
+            conn.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS stadiums (
+                    stadium_id INTEGER PRIMARY KEY, name TEXT,
+                    roof_type VARCHAR(10) DEFAULT 'open'
+                )
+            """)
+            )
+            conn.execute(text("INSERT OR IGNORE INTO stadiums VALUES (1, 'Test Park', 'open')"))
         monkeypatch.setattr(
             ingestor,
             "get_forecast_for_stadium",

@@ -2,7 +2,7 @@
 
 import os
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -292,11 +292,14 @@ class TestGetExposureSummary:
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
-        mock_conn.execute.return_value = mock_cursor
+        mock_conn.__exit__.return_value = None
+        mock_conn.__aenter__.return_value = mock_conn
+        mock_conn.__aexit__.return_value = None
+        mock_conn.execute = AsyncMock(return_value=mock_cursor)
         mock_engine = MagicMock()
         mock_engine.connect.return_value = mock_conn
 
-        with patch("api.database.get_engine", return_value=mock_engine):
+        with patch("api.routers.risk.get_async_engine", return_value=mock_engine):
             resp = client.get("/api/v1/risk/exposure/summary", headers=headers)
 
         assert resp.status_code == 200
@@ -313,11 +316,14 @@ class TestGetExposureSummary:
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
-        mock_conn.execute.return_value = mock_cursor
+        mock_conn.__exit__.return_value = None
+        mock_conn.__aenter__.return_value = mock_conn
+        mock_conn.__aexit__.return_value = None
+        mock_conn.execute = AsyncMock(return_value=mock_cursor)
         mock_engine = MagicMock()
         mock_engine.connect.return_value = mock_conn
 
-        with patch("api.database.get_engine", return_value=mock_engine):
+        with patch("api.routers.risk.get_async_engine", return_value=mock_engine):
             resp = client.get("/api/v1/risk/exposure/summary", headers=headers)
 
         assert resp.status_code == 200

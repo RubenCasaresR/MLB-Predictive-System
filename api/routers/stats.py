@@ -11,11 +11,12 @@ from datetime import date as d
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
+import httpx
 import requests as http_requests
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
-from api.database import get_engine
+from api.database import get_async_engine
 from api.models.pydantic_models import (
     BullpenPreviewStats,
     GamePreviewResponse,
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
 
 
-def _get_pitcher_stats(engine, pitcher_id) -> dict:
+async def _get_pitcher_stats(pitcher_id) -> dict:
     """Obtiene stats del pitcher desde player_rolling_stats y players"""
     if not pitcher_id:
         return {}
@@ -35,8 +36,9 @@ def _get_pitcher_stats(engine, pitcher_id) -> dict:
         pid = int(pitcher_id)
     except (ValueError, TypeError):
         return {}
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("""
             SELECT p.full_name, p.throws,
                    prs.fip_30d, prs.k_per_9_30d, prs.bb_per_9_30d,
@@ -51,7 +53,8 @@ def _get_pitcher_stats(engine, pitcher_id) -> dict:
             WHERE p.player_id = :pid
         """),
             {"pid": pid},
-        ).fetchone()
+        )
+        row = result.fetchone()
     if not row:
         return {}
     return {
@@ -67,12 +70,13 @@ def _get_pitcher_stats(engine, pitcher_id) -> dict:
     }
 
 
-def _get_team_stats(engine, team_id) -> dict:
+async def _get_team_stats(team_id) -> dict:
     """Obtiene stats del equipo desde team_rolling_stats"""
     if not team_id:
         return {}
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("""
             SELECT bullpen_era_30d, bullpen_fip_30d, woba_30d
             FROM team_rolling_stats
@@ -80,7 +84,8 @@ def _get_team_stats(engine, team_id) -> dict:
             ORDER BY as_of_date DESC LIMIT 1
         """),
             {"tid": team_id},
-        ).fetchone()
+        )
+        row = result.fetchone()
     if not row:
         return {}
     return {
@@ -182,20 +187,21 @@ def _to_local_tz(dt_str: str) -> str:
 
 @router.get("/players/{player_id}", response_model=PlayerStatsResponse)
 async def get_player_stats(player_id: int):
-    engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text(
                 "SELECT player_id, full_name, team_id, position, bats, throws "
                 "FROM players WHERE player_id = :pid"
             ),
             {"pid": player_id},
-        ).fetchone()
+        )
+        row = result.fetchone()
 
         if not row:
             raise HTTPException(status_code=404, detail="Player not found")
 
-        stats_row = conn.execute(
+        stats_result = await conn.execute(
             text(
                 "SELECT woba_30d, fip_30d, xera_30d, avg_velo_30d, "
                 "whiff_pct_30d, fatigue_score "
@@ -204,7 +210,8 @@ async def get_player_stats(player_id: int):
                 "ORDER BY as_of_date DESC LIMIT 1"
             ),
             {"pid": player_id},
-        ).fetchone()
+        )
+        stats_row = stats_result.fetchone()
 
     return PlayerStatsResponse(
         player_id=row[0],
@@ -227,7 +234,7 @@ async def list_players(
     team_id: str | None = Query(None),
     position: str | None = Query(None),
 ):
-    engine = get_engine()
+    async_engine = get_async_engine()
     query = "SELECT player_id, full_name, team_id FROM players WHERE 1=1"
     params = {}
     if team_id:
@@ -238,8 +245,9 @@ async def list_players(
         params["pos"] = position
     query += " ORDER BY full_name LIMIT 100"
 
-    with engine.connect() as conn:
-        rows = conn.execute(text(query), params).fetchall()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(text(query), params)
+        rows = result.fetchall()
 
     return [
         PlayerStatsResponse(player_id=r[0], full_name=r[1] or "", team_id=r[2] or "") for r in rows
@@ -248,9 +256,9 @@ async def list_players(
 
 @router.get("/preview/{game_id}", response_model=GamePreviewResponse)
 async def get_game_preview(game_id: str):
-    engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("""
                 SELECT g.game_date, g.home_team_id, g.away_team_id,
                        g.home_probable_pitcher, g.away_probable_pitcher,
@@ -273,7 +281,8 @@ async def get_game_preview(game_id: str):
                 WHERE g.game_id = :gid
             """),
             {"gid": game_id},
-        ).fetchone()
+        )
+        row = result.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -283,10 +292,10 @@ async def get_game_preview(game_id: str):
     home_pitcher_id = row[3]
     away_pitcher_id = row[4]
 
-    hp = _get_pitcher_stats(engine, home_pitcher_id)
-    ap = _get_pitcher_stats(engine, away_pitcher_id)
-    ht = _get_team_stats(engine, home_team)
-    at = _get_team_stats(engine, away_team)
+    hp = await _get_pitcher_stats(home_pitcher_id)
+    ap = await _get_pitcher_stats(away_pitcher_id)
+    ht = await _get_team_stats(home_team)
+    at = await _get_team_stats(away_team)
 
     home_wp = float(row[10]) if row[10] else 0
     away_wp = float(row[11]) if row[11] else 0
@@ -324,9 +333,9 @@ async def list_todays_games(date: str | None = Query(None)):
 
     target = date or d.today().isoformat()
 
-    engine = get_engine()
-    with engine.connect() as conn:
-        rows = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("""
                 SELECT g.game_id, g.game_date, g.home_team_id, g.away_team_id,
                        g.home_probable_pitcher, g.away_probable_pitcher,
@@ -350,7 +359,8 @@ async def list_todays_games(date: str | None = Query(None)):
                 ORDER BY g.start_time_et
             """),
             {"gd": target},
-        ).fetchall()
+        )
+        rows = result.fetchall()
 
     results = []
     for r in rows:
@@ -359,10 +369,10 @@ async def list_todays_games(date: str | None = Query(None)):
         home_team = r[2] or ""
         away_team = r[3] or ""
 
-        hp = _get_pitcher_stats(engine, home_pitcher_id)
-        ap = _get_pitcher_stats(engine, away_pitcher_id)
-        ht = _get_team_stats(engine, home_team)
-        at = _get_team_stats(engine, away_team)
+        hp = await _get_pitcher_stats(home_pitcher_id)
+        ap = await _get_pitcher_stats(away_pitcher_id)
+        ht = await _get_team_stats(home_team)
+        at = await _get_team_stats(away_team)
 
         home_wp = float(r[11]) if r[11] is not None else 0
         away_wp = float(r[12]) if r[12] is not None else 0
@@ -404,12 +414,13 @@ async def list_todays_games(date: str | None = Query(None)):
 
 @router.get("/teams/{team_id}")
 async def get_team_stats(team_id: str):
-    engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(
             text("SELECT name, league, division, ballpark FROM teams WHERE team_id = :tid"),
             {"tid": team_id},
-        ).fetchone()
+        )
+        row = result.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -429,9 +440,9 @@ async def get_pitcher_fatigue(pitcher_id: int):
 
     from features.fatigue_detector import FatigueDetector
 
-    engine = get_engine()
-    with engine.connect() as conn:
-        velo_row = conn.execute(
+    async_engine = get_async_engine()
+    async with async_engine.connect() as conn:
+        velo_result = await conn.execute(
             text("""
                 SELECT AVG(p.release_speed) AS avg_velo
                 FROM pitches p
@@ -440,7 +451,8 @@ async def get_pitcher_fatigue(pitcher_id: int):
                   AND p.release_speed IS NOT NULL
             """),
             {"pid": pitcher_id},
-        ).fetchone()
+        )
+        velo_row = velo_result.fetchone()
 
     avg_velo = float(velo_row[0]) if velo_row and velo_row[0] else 93.0
     detector = FatigueDetector()
@@ -469,7 +481,7 @@ async def get_sharp_money_signals(
     game_id: str | None = Query(None),
     min_confidence: float = Query(0.5, ge=0.0, le=1.0),
 ):
-    engine = get_engine()
+    async_engine = get_async_engine()
     query = """
         SELECT DISTINCT ON (ml.game_id)
             ml.game_id,
@@ -487,8 +499,9 @@ async def get_sharp_money_signals(
         params["gid"] = game_id
     query += " ORDER BY ml.game_id, ml.recorded_at DESC"
 
-    with engine.connect() as conn:
-        rows = conn.execute(text(query), params).fetchall()
+    async with async_engine.connect() as conn:
+        result = await conn.execute(text(query), params)
+        rows = result.fetchall()
 
     return [
         {"game_id": r[0], "signal_type": r[1], "confidence": min_confidence}

@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
-from api.database import get_engine
+from api.database import get_async_engine
 from api.models.sure_bet_models import SureBetRecommendation, SureBetsResponse
 
 logger = logging.getLogger(__name__)
@@ -41,27 +41,26 @@ def _normal_cdf(x, mean, std):
 
 class SureBetService:
     def __init__(self):
-        self.engine = get_engine()
         self.tz_name = os.getenv("TIMEZONE", "America/Mexico_City")
         self.target_tz = ZoneInfo(self.tz_name)
 
-    def get_sure_bets(self) -> SureBetsResponse:
-        games = self._get_upcoming_games()
+    async def get_sure_bets(self) -> SureBetsResponse:
+        games = await self._get_upcoming_games()
         all_recs: list[SureBetRecommendation] = []
 
         for game in games:
             gid = game["game_id"]
-            sim = self._get_simulation(gid)
-            market = self._get_market(gid)
-            pitchers = self._get_pitcher_data(
+            sim = await self._get_simulation(gid)
+            market = await self._get_market(gid)
+            pitchers = await self._get_pitcher_data(
                 gid,
                 game["home_team_id"],
                 game["away_team_id"],
                 game.get("home_pitcher_id"),
                 game.get("away_pitcher_id"),
             )
-            teams = self._get_team_data(game["home_team_id"], game["away_team_id"])
-            weather = self._get_weather(gid)
+            teams = await self._get_team_data(game["home_team_id"], game["away_team_id"])
+            weather = await self._get_weather(gid)
 
             if sim and market:
                 ml_recs = self._evaluate_moneyline(game, sim, market, pitchers, teams, weather)
@@ -84,12 +83,13 @@ class SureBetService:
 
         return result
 
-    def _get_upcoming_games(self) -> list[dict]:
+    async def _get_upcoming_games(self) -> list[dict]:
         from datetime import date as d
 
         today = d.today().isoformat()
-        with self.engine.connect() as conn:
-            rows = conn.execute(
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT g.game_id, g.game_date, g.home_team_id, g.away_team_id,
                        g.home_probable_pitcher, g.away_probable_pitcher,
@@ -104,7 +104,8 @@ class SureBetService:
                 LIMIT 15
             """),
                 {"today": today},
-            ).fetchall()
+            )
+            rows = result.fetchall()
         return [
             {
                 "game_id": r[0],
@@ -125,9 +126,10 @@ class SureBetService:
             for r in rows
         ]
 
-    def _get_simulation(self, game_id: str) -> dict | None:
-        with self.engine.connect() as conn:
-            row = conn.execute(
+    async def _get_simulation(self, game_id: str) -> dict | None:
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT home_win_prob, away_win_prob,
                        mean_home_runs, mean_away_runs,
@@ -137,7 +139,8 @@ class SureBetService:
                 WHERE game_id = :gid
             """),
                 {"gid": game_id},
-            ).fetchone()
+            )
+            row = result.fetchone()
         if not row:
             return None
         return {
@@ -152,9 +155,10 @@ class SureBetService:
             "n_iterations": row[8] or 10000,
         }
 
-    def _get_market(self, game_id: str) -> dict | None:
-        with self.engine.connect() as conn:
-            row = conn.execute(
+    async def _get_market(self, game_id: str) -> dict | None:
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT home_moneyline_close, away_moneyline_close,
                        total_close, total_over_odds_close, total_under_odds_close,
@@ -165,7 +169,8 @@ class SureBetService:
                 LIMIT 1
             """),
                 {"gid": game_id},
-            ).fetchone()
+            )
+            row = result.fetchone()
         if not row:
             return None
         return {
@@ -178,10 +183,11 @@ class SureBetService:
             "rlm_flag": bool(row[6]) if row[6] else False,
         }
 
-    def _get_pitcher_data(
+    async def _get_pitcher_data(
         self, game_id: str, home_team: str, away_team: str, home_pitcher_id, away_pitcher_id
     ) -> dict:
         result = {"home": {}, "away": {}}
+        async_engine = get_async_engine()
         for side, pid, team in [
             ("home", home_pitcher_id, home_team),
             ("away", away_pitcher_id, away_team),
@@ -193,8 +199,8 @@ class SureBetService:
             except (ValueError, TypeError):
                 result[side] = {"fatigue_score": None, "fip_30d": None, "avg_velo_30d": None}
                 continue
-            with self.engine.connect() as conn:
-                row = conn.execute(
+            async with async_engine.connect() as conn:
+                db_result = await conn.execute(
                     text("""
                     SELECT fatigue_score, fip_30d, avg_velo_30d, k_per_9_30d
                     FROM player_rolling_stats
@@ -203,7 +209,8 @@ class SureBetService:
                     LIMIT 1
                 """),
                     {"pid": pid_int},
-                ).fetchone()
+                )
+                row = db_result.fetchone()
             if row:
                 result[side] = {
                     "fatigue_score": float(row[0]) if row[0] else None,
@@ -213,11 +220,12 @@ class SureBetService:
                 }
         return result
 
-    def _get_team_data(self, home_team: str, away_team: str) -> dict:
+    async def _get_team_data(self, home_team: str, away_team: str) -> dict:
         result = {"home": {}, "away": {}}
+        async_engine = get_async_engine()
         for side, team in [("home", home_team), ("away", away_team)]:
-            with self.engine.connect() as conn:
-                row = conn.execute(
+            async with async_engine.connect() as conn:
+                db_result = await conn.execute(
                     text("""
                     SELECT bullpen_era_30d, bullpen_fip_30d, record_last_10, run_diff_30d
                     FROM team_rolling_stats
@@ -226,7 +234,8 @@ class SureBetService:
                     LIMIT 1
                 """),
                     {"tid": team},
-                ).fetchone()
+                )
+                row = db_result.fetchone()
             if row:
                 result[side] = {
                     "bullpen_era_30d": float(row[0]) if row[0] else None,
@@ -236,9 +245,10 @@ class SureBetService:
                 }
         return result
 
-    def _get_weather(self, game_id: str) -> dict | None:
-        with self.engine.connect() as conn:
-            row = conn.execute(
+    async def _get_weather(self, game_id: str) -> dict | None:
+        async_engine = get_async_engine()
+        async with async_engine.connect() as conn:
+            result = await conn.execute(
                 text("""
                 SELECT temperature, wind_speed, wind_direction, precipitation_pct, condition
                 FROM weather_hourly
@@ -247,7 +257,8 @@ class SureBetService:
                 LIMIT 1
             """),
                 {"gid": game_id},
-            ).fetchone()
+            )
+            row = result.fetchone()
         if not row:
             return None
         return {

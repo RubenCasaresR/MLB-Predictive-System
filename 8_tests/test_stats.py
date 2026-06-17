@@ -2,7 +2,7 @@
 
 import os
 import sys
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -82,6 +82,37 @@ def _create_tables(engine):
                 p_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ab_id INTEGER,
                 release_speed REAL
+            )
+        """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS stadiums (
+                stadium_id INTEGER PRIMARY KEY,
+                name TEXT,
+                roof_type VARCHAR(10) DEFAULT 'open'
+            )
+        """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS market_lines (
+                game_id TEXT,
+                home_moneyline_close INTEGER,
+                away_moneyline_close INTEGER,
+                total_close REAL,
+                sharp_money_flag INTEGER,
+                rlm_flag INTEGER,
+                recorded_at TEXT
+            )
+        """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS simulation_results (
+                game_id TEXT PRIMARY KEY,
+                home_win_prob REAL,
+                away_win_prob REAL
             )
         """)
         )
@@ -186,9 +217,12 @@ def _make_mock_engine(fetchone_result=None, fetchall_result=None):
         mock_main_result.fetchall.return_value = fetchall_result
     mock_main_result.fetchone.return_value = fetchone_result
     mock_conn.__enter__.return_value = mock_conn
+    mock_conn.__exit__.return_value = None
+    mock_conn.__aenter__.return_value = mock_conn
+    mock_conn.__aexit__.return_value = None
 
-    # Default execute returns the main result
-    mock_conn.execute.return_value = mock_main_result
+    # Default execute returns an awaitable
+    mock_conn.execute = AsyncMock(return_value=mock_main_result)
     mock_engine.connect.return_value = mock_conn
     return mock_engine
 
@@ -207,6 +241,9 @@ def _make_mock_engine_with_extra(
     mock_engine = MagicMock()
     mock_conn = MagicMock()
     mock_conn.__enter__.return_value = mock_conn
+    mock_conn.__exit__.return_value = None
+    mock_conn.__aenter__.return_value = mock_conn
+    mock_conn.__aexit__.return_value = None
     mock_engine.connect.return_value = mock_conn
 
     def _execute_side_effect(*exec_args, **exec_kwargs):
@@ -261,7 +298,7 @@ def _make_mock_engine_with_extra(
             mock_res.fetchone.return_value = fetchone_result
         return mock_res
 
-    mock_conn.execute.side_effect = _execute_side_effect
+    mock_conn.execute = AsyncMock(side_effect=_execute_side_effect)
     return mock_engine
 
 
@@ -411,7 +448,7 @@ class TestGetGamePreview:
             team_home_result=self.TEAM_HOME_ROW,
             team_away_result=self.TEAM_AWAY_ROW,
         )
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview/2026-05-20-NYY-BOS")
 
         assert resp.status_code == 200
@@ -441,7 +478,7 @@ class TestGetGamePreview:
 
     def test_returns_404_when_game_not_found(self):
         engine = _make_mock_engine(fetchone_result=None)
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview/NONEXISTENT")
 
         assert resp.status_code == 404
@@ -471,7 +508,7 @@ class TestGetGamePreview:
             team_home_result=None,
             team_away_result=None,
         )
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview/2026-05-21-LAD-SFG")
 
         assert resp.status_code == 200
@@ -492,7 +529,7 @@ class TestGetGamePreview:
             team_home_result=self.TEAM_HOME_ROW,
             team_away_result=self.TEAM_AWAY_ROW,
         )
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview/2026-05-20-NYY-BOS")
 
         data = resp.json()
@@ -559,7 +596,7 @@ class TestListTodaysGames:
             team_home_result=self.TEAM_HOME_ROW,
             team_away_result=self.TEAM_AWAY_ROW,
         )
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview?date=2026-05-20")
 
         assert resp.status_code == 200
@@ -572,7 +609,7 @@ class TestListTodaysGames:
 
     def test_returns_empty_when_no_games_that_day(self):
         engine = _make_mock_engine(fetchall_result=[])
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview?date=2020-01-01")
 
         assert resp.status_code == 200
@@ -586,7 +623,7 @@ class TestListTodaysGames:
             team_home_result=self.TEAM_HOME_ROW,
             team_away_result=self.TEAM_AWAY_ROW,
         )
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/preview?date=2026-05-20")
 
         data = resp.json()
@@ -696,7 +733,7 @@ class TestGetSharpMoneySignals:
 
     def test_returns_sharp_money_signals(self):
         engine = _make_mock_engine(fetchall_result=self.SHARP_MONEY_ROWS)
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/market/sharp-money")
 
         assert resp.status_code == 200
@@ -706,7 +743,7 @@ class TestGetSharpMoneySignals:
 
     def test_filters_by_game_id(self):
         engine = _make_mock_engine(fetchall_result=[self.SHARP_MONEY_ROWS[0]])
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/market/sharp-money?game_id=2026-05-20-NYY-BOS")
 
         assert resp.status_code == 200
@@ -717,7 +754,7 @@ class TestGetSharpMoneySignals:
 
     def test_returns_empty_when_no_matching_game(self):
         engine = _make_mock_engine(fetchall_result=[])
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/market/sharp-money?game_id=NONEXISTENT")
 
         assert resp.status_code == 200
@@ -725,7 +762,7 @@ class TestGetSharpMoneySignals:
 
     def test_signals_have_expected_fields(self):
         engine = _make_mock_engine(fetchall_result=self.SHARP_MONEY_ROWS)
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/market/sharp-money")
 
         data = resp.json()
@@ -736,7 +773,7 @@ class TestGetSharpMoneySignals:
 
     def test_includes_min_confidence_in_response(self):
         engine = _make_mock_engine(fetchall_result=self.SHARP_MONEY_ROWS)
-        with patch("api.routers.stats.get_engine", return_value=engine):
+        with patch("api.routers.stats.get_async_engine", return_value=engine):
             resp = client.get("/api/v1/stats/market/sharp-money?min_confidence=0.7")
 
         data = resp.json()
