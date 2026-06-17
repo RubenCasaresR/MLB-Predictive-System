@@ -137,6 +137,14 @@ class ETLOrchestrator:
 
                 hpp = _safe_int(game.get("home_probable_pitcher"))
                 app = _safe_int(game.get("away_probable_pitcher"))
+
+                for pid in (hpp, app):
+                    if pid is not None:
+                        conn.execute(
+                            text("INSERT INTO players (player_id, full_name) VALUES (:pid, 'Unknown Player') ON CONFLICT DO NOTHING"),
+                            {"pid": pid},
+                        )
+
                 conn.execute(
                     text("""
                         INSERT INTO games (game_id, game_date, season,

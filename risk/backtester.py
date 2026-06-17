@@ -96,7 +96,7 @@ class BacktestEngine:
         self.bankroll = PersistentBankrollManager(
             initial=initial_bankroll,
             db_url=db_url,
-            user_id="backtest",
+            user_id=f"backtest_{datetime.now().strftime('%Y%m%d_%H%M')}",
         )
         self.kelly = KellyCriterion(
             bankroll=initial_bankroll,
