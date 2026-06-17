@@ -1,0 +1,39 @@
+{
+  "intercept": 0.520,
+  "coefficients": {
+    "avg_velo": 0.025,
+    "whiff_pct": 1.200,
+    "opponent_k_pct": 0.450,
+    "park_k_factor": -0.080,
+    "days_rested": 0.035,
+    "avg_spin": 0.0008,
+    "pitch_count_l30": 0.002,
+    "swing_pct": 0.800,
+    "o_contact_pct": -0.600,
+    "home_plate_ump_cs_rate": 0.300,
+    "is_away": -0.020,
+    "is_division_game": 0.010,
+    "month": -0.005,
+    "temperature": 0.001,
+    "precipitation_pct": -0.100
+  },
+  "feature_names": [
+    "avg_velo",
+    "whiff_pct",
+    "opponent_k_pct",
+    "park_k_factor",
+    "days_rested",
+    "avg_spin",
+    "pitch_count_l30",
+    "swing_pct",
+    "o_contact_pct",
+    "home_plate_ump_cs_rate",
+    "is_away",
+    "is_division_game",
+    "month",
+    "temperature",
+    "precipitation_pct"
+  ],
+  "r_squared": 0.42,
+  "training_samples": 45000
+}

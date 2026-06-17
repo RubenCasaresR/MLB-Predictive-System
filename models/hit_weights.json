@@ -1,0 +1,27 @@
+{
+  "intercept": 0.100,
+  "coefficients": {
+    "woba": 3.500,
+    "hard_hit_pct": 0.800,
+    "barrel_pct": 1.500,
+    "opponent_fip": 0.050,
+    "park_hit_factor": 0.200,
+    "platoon_advantage": 0.080,
+    "k_rate": -0.600,
+    "bb_rate": 0.200,
+    "launch_angle_avg": -0.003
+  },
+  "feature_names": [
+    "woba",
+    "hard_hit_pct",
+    "barrel_pct",
+    "opponent_fip",
+    "park_hit_factor",
+    "platoon_advantage",
+    "k_rate",
+    "bb_rate",
+    "launch_angle_avg"
+  ],
+  "r_squared": 0.35,
+  "training_samples": 38000
+}

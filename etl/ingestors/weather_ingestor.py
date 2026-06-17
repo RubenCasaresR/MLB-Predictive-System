@@ -68,6 +68,7 @@ class WeatherIngestor:
         self.db_url = db_url
         self.engine = create_engine(db_url)
         self.session = requests.Session()
+        self._roof_cache: dict[int, str] = {}
         self.session.headers.update(
             {
                 "User-Agent": "MLB Predictive System/1.0 (contact@mlbpredictive.com)",
@@ -76,12 +77,17 @@ class WeatherIngestor:
         logger.info("WeatherIngestor initialized")
 
     def _get_roof_type(self, stadium_id: int) -> str | None:
+        if stadium_id in self._roof_cache:
+            return self._roof_cache[stadium_id]
         with self.engine.connect() as conn:
             row = conn.execute(
                 text("SELECT roof_type FROM stadiums WHERE stadium_id = :sid"),
                 {"sid": stadium_id},
             ).fetchone()
-            return row[0] if row else None
+            roof = row[0] if row else None
+            if roof:
+                self._roof_cache[stadium_id] = roof
+            return roof
 
     def _neutralise_weather(self) -> list[dict]:
         return [
@@ -192,6 +198,19 @@ class WeatherIngestor:
 
         logger.info(f"Loaded {len(df)} weather records for {game_id}")
 
+    def _preload_roof_cache(self, stadium_ids: list[int]):
+        uncached = [sid for sid in stadium_ids if sid not in self._roof_cache]
+        if not uncached:
+            return
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT stadium_id, roof_type FROM stadiums WHERE stadium_id = ANY(:sids)"),
+                {"sids": uncached},
+            ).fetchall()
+            for sid, roof in rows:
+                if roof:
+                    self._roof_cache[sid] = roof
+
     def ingest_team_games(self, game_date: date):
         with self.engine.connect() as conn:
             games = conn.execute(
@@ -203,6 +222,9 @@ class WeatherIngestor:
                 """),
                 {"gd": game_date},
             ).fetchall()
+
+        stadium_ids = [int(v) for _, v, _ in games if v]
+        self._preload_roof_cache(stadium_ids)
 
         for game_id, venue_id, start_time in games:
             if start_time:

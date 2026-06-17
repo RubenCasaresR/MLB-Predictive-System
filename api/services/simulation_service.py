@@ -236,26 +236,26 @@ class SimulationService:
                     })
 
                 gi_result = await conn.execute(
-                    text("SELECT venue_id, home_plate_umpire_id FROM games WHERE game_id = :gid"),
+                    text("""
+                        SELECT g.venue_id, g.home_plate_umpire_id, s.roof_type
+                        FROM games g
+                        LEFT JOIN stadiums s ON s.stadium_id = g.venue_id
+                        WHERE g.game_id = :gid
+                    """),
                     {"gid": game_id},
                 )
                 gi = gi_result.fetchone()
                 if gi:
                     ctx["stadium_id"] = int(gi[0]) if gi[0] else 0
                     ctx["umpire_id"] = int(gi[1]) if gi[1] else 0
+                    roof = str(gi[2]) if gi[2] else None
 
                     # Neutralizar clima si el estadio tiene domo o techo retráctil
-                    if ctx["stadium_id"]:
-                        roof_result = await conn.execute(
-                            text("SELECT roof_type FROM stadiums WHERE stadium_id = :sid"),
-                            {"sid": ctx["stadium_id"]},
-                        )
-                        roof = roof_result.scalar()
-                        if roof in ("dome", "retractable"):
-                            ctx["temperature"] = 72.0
-                            ctx["wind_speed"] = 0.0
-                            ctx["wind_direction"] = "NONE"
-                            logger.info(f"Neutralized weather for domed stadium (game {game_id})")
+                    if roof in ("dome", "retractable"):
+                        ctx["temperature"] = 72.0
+                        ctx["wind_speed"] = 0.0
+                        ctx["wind_direction"] = "NONE"
+                        logger.info(f"Neutralized weather for domed stadium (game {game_id})")
 
                 for side, tid in [("home", home_team_id), ("away", away_team_id)]:
                     if tid:

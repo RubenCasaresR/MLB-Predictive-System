@@ -118,11 +118,13 @@ class ETLOrchestrator:
 
         engine = create_engine(self.db_url)
         with engine.begin() as conn:
+            team_stadium_rows = conn.execute(
+                text("SELECT team_id, stadium_id FROM stadiums"),
+            ).fetchall()
+            team_stadium_map = {tid: sid for tid, sid in team_stadium_rows}
+
             for _, game in games.iterrows():
-                venue_id = conn.execute(
-                    text("SELECT stadium_id FROM stadiums WHERE team_id = :tid"),
-                    {"tid": game["home_team_id"]},
-                ).scalar()
+                venue_id = team_stadium_map.get(game["home_team_id"])
 
                 def _safe_int(val):
                     if val is None:
@@ -487,8 +489,10 @@ class ETLOrchestrator:
                 ).scalar()
                 game_info = conn.execute(
                     text("""
-                        SELECT venue_id, home_plate_umpire_id
-                        FROM games WHERE game_id = :gid
+                        SELECT g.venue_id, g.home_plate_umpire_id, s.roof_type
+                        FROM games g
+                        LEFT JOIN stadiums s ON s.stadium_id = g.venue_id
+                        WHERE g.game_id = :gid
                     """),
                     {"gid": game_id},
                 ).fetchone()
@@ -506,19 +510,14 @@ class ETLOrchestrator:
             away_bp_fip = float(abpf) if abpf else 4.50
             stadium_id = int(game_info[0]) if game_info and game_info[0] else 0
             umpire_id = int(game_info[1]) if game_info and game_info[1] else 0
+            roof = str(game_info[2]) if game_info and game_info[2] else None
 
             # Neutralizar clima si el estadio tiene domo o techo retráctil
-            if stadium_id:
-                with engine.connect() as roof_conn:
-                    roof = roof_conn.execute(
-                        text("SELECT roof_type FROM stadiums WHERE stadium_id = :sid"),
-                        {"sid": stadium_id},
-                    ).scalar()
-                if roof in ("dome", "retractable"):
-                    temp = 72.0
-                    wind_spd = 0.0
-                    wind_dir = "NONE"
-                    logger.info(f"Neutralized weather for domed stadium (game {game_id})")
+            if roof in ("dome", "retractable"):
+                temp = 72.0
+                wind_spd = 0.0
+                wind_dir = "NONE"
+                logger.info(f"Neutralized weather for domed stadium (game {game_id})")
 
             home_rest = int(f.home_rest_days) if f and f.home_rest_days else 4
             away_rest = int(f.away_rest_days) if f and f.away_rest_days else 4

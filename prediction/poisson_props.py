@@ -21,6 +21,8 @@ import pickle
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional, Tuple
 
+import os
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -50,78 +52,134 @@ class PoissonModel:
         return math.exp(self.predict_log_lambda(features))
 
 
+_DEFAULT_MODELS_DIR = "models"
+
+_STRIKEOUT_FALLBACK_WEIGHTS = {
+    "intercept": 0.520,
+    "coefficients": {
+        "avg_velo": 0.025,
+        "whiff_pct": 1.200,
+        "opponent_k_pct": 0.450,
+        "park_k_factor": -0.080,
+        "days_rested": 0.035,
+        "avg_spin": 0.0008,
+        "pitch_count_l30": 0.002,
+        "swing_pct": 0.800,
+        "o_contact_pct": -0.600,
+        "home_plate_ump_cs_rate": 0.300,
+        "is_away": -0.020,
+        "is_division_game": 0.010,
+        "month": -0.005,
+        "temperature": 0.001,
+        "precipitation_pct": -0.100,
+    },
+    "feature_names": [
+        "avg_velo",
+        "whiff_pct",
+        "opponent_k_pct",
+        "park_k_factor",
+        "days_rested",
+        "avg_spin",
+        "pitch_count_l30",
+        "swing_pct",
+        "o_contact_pct",
+        "home_plate_ump_cs_rate",
+        "is_away",
+        "is_division_game",
+        "month",
+        "temperature",
+        "precipitation_pct",
+    ],
+    "r_squared": 0.42,
+    "training_samples": 45000,
+}
+
+
 class StrikeoutModel(PoissonModel):
-    def __init__(self):
-        super().__init__(
-            intercept=0.520,
-            coefficients={
-                "avg_velo": 0.025,
-                "whiff_pct": 1.200,
-                "opponent_k_pct": 0.450,
-                "park_k_factor": -0.080,
-                "days_rested": 0.035,
-                "avg_spin": 0.0008,
-                "pitch_count_l30": 0.002,
-                "swing_pct": 0.800,
-                "o_contact_pct": -0.600,
-                "home_plate_ump_cs_rate": 0.300,
-                "is_away": -0.020,
-                "is_division_game": 0.010,
-                "month": -0.005,
-                "temperature": 0.001,
-                "precipitation_pct": -0.100,
-            },
-            feature_names=[
-                "avg_velo",
-                "whiff_pct",
-                "opponent_k_pct",
-                "park_k_factor",
-                "days_rested",
-                "avg_spin",
-                "pitch_count_l30",
-                "swing_pct",
-                "o_contact_pct",
-                "home_plate_ump_cs_rate",
-                "is_away",
-                "is_division_game",
-                "month",
-                "temperature",
-                "precipitation_pct",
-            ],
-            r_squared=0.42,
-            training_samples=45000,
-        )
+    def __init__(self, weights_path: str | None = None):
+        weights = self._resolve_weights(weights_path)
+        super().__init__(**weights)
+
+    @staticmethod
+    def _resolve_weights_path(weights_path: str | None) -> str:
+        if weights_path is not None:
+            return weights_path
+        return os.getenv("STRIKEOUT_MODEL_PATH") or os.path.join(_DEFAULT_MODELS_DIR, "strikeout_weights.json")
+
+    @classmethod
+    def _resolve_weights(cls, weights_path: str | None = None) -> dict:
+        path = cls._resolve_weights_path(weights_path)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            return {
+                "intercept": data["intercept"],
+                "coefficients": data["coefficients"],
+                "feature_names": data["feature_names"],
+                "r_squared": data.get("r_squared", 0.0),
+                "training_samples": data.get("training_samples", 0),
+            }
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Could not load strikeout weights from {path}: {e}, using fallback")
+            return dict(_STRIKEOUT_FALLBACK_WEIGHTS)
+
+
+_HIT_FALLBACK_WEIGHTS = {
+    "intercept": 0.100,
+    "coefficients": {
+        "woba": 3.500,
+        "hard_hit_pct": 0.800,
+        "barrel_pct": 1.500,
+        "opponent_fip": 0.050,
+        "park_hit_factor": 0.200,
+        "platoon_advantage": 0.080,
+        "k_rate": -0.600,
+        "bb_rate": 0.200,
+        "launch_angle_avg": -0.003,
+    },
+    "feature_names": [
+        "woba",
+        "hard_hit_pct",
+        "barrel_pct",
+        "opponent_fip",
+        "park_hit_factor",
+        "platoon_advantage",
+        "k_rate",
+        "bb_rate",
+        "launch_angle_avg",
+    ],
+    "r_squared": 0.35,
+    "training_samples": 38000,
+}
 
 
 class HitModel(PoissonModel):
-    def __init__(self):
-        super().__init__(
-            intercept=0.100,
-            coefficients={
-                "woba": 3.500,
-                "hard_hit_pct": 0.800,
-                "barrel_pct": 1.500,
-                "opponent_fip": 0.050,
-                "park_hit_factor": 0.200,
-                "platoon_advantage": 0.080,
-                "k_rate": -0.600,
-                "bb_rate": 0.200,
-                "launch_angle_avg": -0.003,
-            },
-            feature_names=[
-                "woba",
-                "hard_hit_pct",
-                "barrel_pct",
-                "opponent_fip",
-                "park_hit_factor",
-                "platoon_advantage",
-                "k_rate",
-                "bb_rate",
-                "launch_angle_avg",
-            ],
-            r_squared=0.35,
-            training_samples=38000,
-        )
+    def __init__(self, weights_path: str | None = None):
+        weights = self._resolve_weights(weights_path)
+        super().__init__(**weights)
+
+    @staticmethod
+    def _resolve_weights_path(weights_path: str | None) -> str:
+        if weights_path is not None:
+            return weights_path
+        return os.getenv("HIT_MODEL_PATH") or os.path.join(_DEFAULT_MODELS_DIR, "hit_weights.json")
+
+    @classmethod
+    def _resolve_weights(cls, weights_path: str | None = None) -> dict:
+        path = cls._resolve_weights_path(weights_path)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            return {
+                "intercept": data["intercept"],
+                "coefficients": data["coefficients"],
+                "feature_names": data["feature_names"],
+                "r_squared": data.get("r_squared", 0.0),
+                "training_samples": data.get("training_samples", 0),
+            }
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Could not load hit model weights from {path}: {e}, using fallback")
+            return dict(_HIT_FALLBACK_WEIGHTS)
 
 
 @dataclass
@@ -148,10 +206,11 @@ class PropBetResult:
 
 
 class PoissonPropsEngine:
-    def __init__(self):
+    def __init__(self, models_dir: str | None = None):
+        models_dir = models_dir or os.getenv("POISSON_MODELS_DIR") or _DEFAULT_MODELS_DIR
         self.models = {
-            "STRIKEOUTS": StrikeoutModel(),
-            "HITS": HitModel(),
+            "STRIKEOUTS": StrikeoutModel(os.path.join(models_dir, "strikeout_weights.json")),
+            "HITS": HitModel(os.path.join(models_dir, "hit_weights.json")),
         }
         self.league_avg_k_pct = 0.225
         self.league_avg_bb_pct = 0.085
